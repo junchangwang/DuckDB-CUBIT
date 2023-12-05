@@ -345,6 +345,4 @@ extension/extension_config_local.cmake
 # extension_external dir
 extension_external
 
-bm*
-
 *.wal
