@@ -228,7 +228,7 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		}
 
 		// Assign the workload of each query to n_threads background threads,
-                // each of which performs the workload of the parallel executor for TPC-H Q6.
+		// each of which performs the workload of the parallel executor for TPC-H Q6.
 		// We control the parallelism by hand, rather than relying on the parallel executor 
 		// for better (hardware characteristics) measurement and performance tuning.
 		auto &table_bind_data = bind_data->Cast<TableScanBindData>();
