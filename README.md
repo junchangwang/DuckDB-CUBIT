@@ -15,7 +15,7 @@ Once start, DuckDB-CUBIT loads three CUBIT instances (respectively for the attri
 The majority of the code implementing the above function is in PhysicalTableScan::GetData() in src/execution/operator/scan/physical_table_scan.cpp. Note that there are several code snippets for performance measurement. In particular, gen_perf_process() is to help you collect hardware characteristics like LLC and TLB misses. 
 
 
-### How to compile
+### How to compile?
 
 - Compile CUBIT by using the command 
   ```
@@ -24,7 +24,7 @@ The majority of the code implementing the above function is in PhysicalTableScan
   ```
 - Build the DuckDB-CUBIT project by using the command "make release"
 
-### How to execute
+### How to execute?
 
 - Start DuckDB by using the command "./build/release/duckdb db_file"
 - Load TPC-H module by using "LOAD tpch;"
