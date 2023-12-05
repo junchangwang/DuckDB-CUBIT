@@ -96,7 +96,7 @@ unique_ptr<GlobalSourceState> PhysicalTableScan::GetGlobalSourceState(ClientCont
 
 SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk &chunk,
                                             OperatorSourceInput &input) const {
-	// We run 10 trials.
+	// We run 10 trials for CUBIT-powered DuckDB on TPC-H Q6.
 	// The first two trials are to warm up. We report the mean value of the following trials. 
 	// We use a similar strategy in reporting the performance of DuckDB's original Scan.											
 	for (int times = 0; times < 10; times++) {
@@ -227,7 +227,8 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 			begin[i] = begin[i - 1] + n_seg_per_thread;
 		}
 
-		// Assign the workload of probing the underlying tuples to n_threads background threads. 
+		// Assign the workload of each query to n_threads background threads,
+                // each of which performs the workload of the parallel executor for TPC-H Q6.
 		// We control the parallelism by hand, rather than relying on the parallel executor 
 		// for better (hardware characteristics) measurement and performance tuning.
 		auto &table_bind_data = bind_data->Cast<TableScanBindData>();
@@ -336,7 +337,7 @@ void PhysicalTableScan::IndexRead(vector<row_t> *row_ids, uint64_t begin, uint64
 
 	for (uint64_t seg_idx = begin; seg_idx < end; seg_idx++)
 	 {
-		// Generate the resulting bitvector (segment).
+		// Generate the resulting bitvector (segment) from CUBIT instances.
 		auto s1 = std::chrono::high_resolution_clock::now();
 		ibis::bitvector seg_shipdate;
 		seg_shipdate.copy(*bitmap_shipdate->bitmaps[lower_year]->seg_btv->seg_table.find(seg_idx)->second.btv);
@@ -363,7 +364,7 @@ void PhysicalTableScan::IndexRead(vector<row_t> *row_ids, uint64_t begin, uint64
 		auto e1 = std::chrono::high_resolution_clock::now();
 		elapsed1 += std::chrono::duration_cast<std::chrono::microseconds>(e1 - s1).count();
 
-		// Transform the resulting bitvector (segment) to the ID list.
+		// Transform the resulting bitvector (segment) from CUBIT instances to ID list.
 		auto s2 = std::chrono::high_resolution_clock::now();
 		for (ibis::bitvector::indexSet index_set = seg_result.firstIndexSet(); index_set.nIndices() > 0; ++index_set) {
 			const ibis::bitvector::word_t *indices = index_set.indices();
@@ -389,7 +390,7 @@ void PhysicalTableScan::IndexRead(vector<row_t> *row_ids, uint64_t begin, uint64
 	vector<storage_t> storage_column_ids;
 
 	// Define the two columns (by specifying their ids) to be probed.
-	// Note that we only probe two columns, rather than 4 in Scan.
+	// Note that for Q6, we only probe two columns, rather than 4 in Scan.
 	storage_column_ids.push_back(uint64_t(5));	// For l_extendedprice
 	storage_column_ids.push_back(uint64_t(6));	// For l_discount
 
@@ -397,7 +398,7 @@ void PhysicalTableScan::IndexRead(vector<row_t> *row_ids, uint64_t begin, uint64
 	local_storage_state.Initialize(storage_column_ids, table_filters);
 	ColumnFetchState column_fetch_state;
 
-	// Prepare chunks to receive data from the underlying tuples.
+	// Prepare chunks to receive data from the underlying data.
 	std::vector<DataChunk *> local_chunks;
 	int64_t elapsed_init = 0;
 	for (size_t i = 0; i < row_ids->size(); i += 2048) {
@@ -443,7 +444,7 @@ void PhysicalTableScan::IndexRead(vector<row_t> *row_ids, uint64_t begin, uint64
 		auto e4 = std::chrono::high_resolution_clock::now();
 		elapsed4 += std::chrono::duration_cast<std::chrono::microseconds>(e4 - s4).count();
 
-		// Calculate the revenue for this chunk.
+		// Calculate the revenue of Q6 for this chunk.
 		auto s5 = std::chrono::high_resolution_clock::now();
 		auto &vec1 = chunk->data[0];
 		auto &vec2 = chunk->data[1];
