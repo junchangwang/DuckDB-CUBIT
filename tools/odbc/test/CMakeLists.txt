@@ -28,6 +28,10 @@ add_executable(
   tests/col_attribute/col_attribute.cpp
   tests/col_attribute/char_query.cpp
   tests/col_attribute/int_query.cpp
+  tests/col_attribute/DATE_query.cpp
+  tests/col_attribute/TIME_query.cpp
+  tests/col_attribute/TIMESTAMP_query.cpp
+  tests/col_attribute/INTERVAL_query.cpp
   tests/col_attribute/utils.cpp)
 
 add_executable(test_connection_odbc common.cpp tests/connect_with_ini.cpp
