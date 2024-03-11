@@ -1,12 +1,26 @@
-from fsspec import filesystem, AbstractFileSystem
+import os
+from io import StringIO, BytesIO, TextIOBase, BufferedReader
+
+from fsspec import AbstractFileSystem
 from fsspec.implementations.memory import MemoryFileSystem
+
 from .bytes_io_wrapper import BytesIOWrapper
-from io import TextIOBase
 
 
 def is_file_like(obj):
     # We only care that we can read from the file
     return hasattr(obj, "read") and hasattr(obj, "seek")
+
+
+class Unclosable:
+    def __init__(self, file):
+        self.file = file
+
+    def __getattr__(self, attr):
+        return getattr(self.file, attr)
+
+    def close(self):
+        pass
 
 
 class ModifiedMemoryFileSystem(MemoryFileSystem):
@@ -23,13 +37,30 @@ class ModifiedMemoryFileSystem(MemoryFileSystem):
                 return name
         return f"{protos[0]}://{name}"
 
+    def _get_size(self, filelike):
+        if isinstance(filelike, (StringIO, BytesIO)):
+            return len(filelike.getvalue())
+        elif isinstance(filelike, BufferedReader):
+            return os.stat(filelike.name).st_size
+        elif hasattr(filelike, 'size'):
+            size = filelike.size
+            return size() if callable(size) else size
+        elif hasattr(filelike, 'seek') and hasattr(filelike, 'tell'):
+            pos = filelike.tell()
+            filelike.seek(0, 2)
+            size = filelike.tell()
+            filelike.seek(pos)
+            return size
+
+        return -1
+
     def info(self, path, **kwargs):
         path = self._strip_protocol(path)
         if path in self.store:
             filelike = self.store[path]
             return {
                 "name": path,
-                "size": getattr(filelike, "size", 0),
+                "size": self._get_size(filelike),
                 "type": "file",
                 "created": getattr(filelike, "created", None),
             }
@@ -48,7 +79,7 @@ class ModifiedMemoryFileSystem(MemoryFileSystem):
         path = self._strip_protocol(path)
         if path in self.store:
             f = self.store[path]
-            return f
+            return Unclosable(f)
         else:
             raise FileNotFoundError(path)
 

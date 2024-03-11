@@ -43,7 +43,7 @@ from duckdb.value.constant import (
 from typing_extensions import Literal
 # stubgen override - missing import of Set
 from typing import Any, ClassVar, Set, Optional, Callable
-from io import StringIO, TextIOBase
+from io import IOBase
 
 from typing import overload, Dict, List, Union
 import pandas
@@ -210,7 +210,7 @@ class DuckDBPyConnection:
     def from_arrow(self, arrow_object: object) -> DuckDBPyRelation: ...
     def read_json(
         self,
-        file_name: str,
+        path_or_buffer: Union[str, IOBase],
         columns: Optional[Dict[str,str]] = None,
         sample_size: Optional[int] = None,
         maximum_depth: Optional[int] = None,
@@ -219,7 +219,7 @@ class DuckDBPyConnection:
     ) -> DuckDBPyRelation: ...
     def read_csv(
         self,
-        path_or_buffer: Union[str, StringIO, TextIOBase],
+        path_or_buffer: Union[str, IOBase],
         header: Optional[bool | int] = None,
         compression: Optional[str] = None,
         sep: Optional[str] = None,
@@ -242,7 +242,7 @@ class DuckDBPyConnection:
     ) -> DuckDBPyRelation: ...
     def from_csv_auto(
         self,
-        path_or_buffer: Union[str, StringIO, TextIOBase],
+        path_or_buffer: Union[str, IOBase],
         header: Optional[bool | int] = None,
         compression: Optional[str] = None,
         sep: Optional[str] = None,
@@ -581,7 +581,7 @@ def order(df: pandas.DataFrame, order_expr: str, connection: DuckDBPyConnection 
 def project(df: pandas.DataFrame, project_expr: str, connection: DuckDBPyConnection = ...) -> DuckDBPyRelation: ...
 def write_csv(df: pandas.DataFrame, file_name: str, connection: DuckDBPyConnection = ...) -> None: ...
 def read_json(
-    file_name: str,
+    path_or_buffer: Union[str, IOBase],
     columns: Optional[Dict[str,str]] = None,
     sample_size: Optional[int] = None,
     maximum_depth: Optional[int] = None,
@@ -590,7 +590,7 @@ def read_json(
     connection: DuckDBPyConnection = ...
 ) -> DuckDBPyRelation: ...
 def read_csv(
-    path_or_buffer: Union[str, StringIO, TextIOBase],
+    path_or_buffer: Union[str, IOBase],
     header: Optional[bool | int] = None,
     compression: Optional[str] = None,
     sep: Optional[str] = None,
