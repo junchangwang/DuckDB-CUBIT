@@ -116,3 +116,25 @@ SELECT * EXCLUDE (blabla) FROM integers
 statement error
 SELECT integers.* EXCLUDE (blabla) FROM integers
 ----
+
+# special fields
+statement ok
+CREATE TABLE special_field("with space" INTEGER, "table" INTEGER, "union" INTEGER)
+
+statement ok
+INSERT INTO special_field VALUES (1, 2, 3)
+
+query II
+SELECT * EXCLUDE "with space" FROM special_field
+----
+2	3
+
+query I
+SELECT * EXCLUDE ("with space", "table") FROM special_field
+----
+3
+
+query I
+SELECT * EXCLUDE ("table", "union",) FROM special_field
+----
+1
