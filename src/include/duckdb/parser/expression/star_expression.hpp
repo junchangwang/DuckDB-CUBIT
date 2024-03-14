@@ -24,6 +24,7 @@ public:
 	//! The relation name in case of tbl.*, or empty if this is a normal *
 	string relation_name;
 	//! List of columns to exclude from the STAR expression
+	//! Each fully-qualified column will be stored as "table_name.column_name"
 	case_insensitive_set_t exclude_list;
 	//! List of columns to replace with another expression
 	case_insensitive_map_t<unique_ptr<ParsedExpression>> replace_list;

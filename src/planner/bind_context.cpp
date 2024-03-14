@@ -335,6 +335,9 @@ void BindContext::GenerateAllColumnExpressions(StarExpression &expr,
 				if (CheckExclusionList(expr, column_name, new_select_list, excluded_columns)) {
 					continue;
 				}
+				if (CheckExclusionList(expr, binding.alias + "." + column_name, new_select_list, excluded_columns)) {
+					continue;
+				}
 				// check if this column is a USING column
 				auto using_binding_ptr = GetUsingBinding(column_name, binding.alias);
 				if (using_binding_ptr) {

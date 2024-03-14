@@ -10,9 +10,18 @@ unique_ptr<ParsedExpression> Transformer::TransformStarExpression(duckdb_libpgqu
 	auto result = make_uniq<StarExpression>(star.relation ? star.relation : string());
 	if (star.except_list) {
 		for (auto head = star.except_list->head; head; head = head->next) {
-			auto value = PGPointerCast<duckdb_libpgquery::PGValue>(head->data.ptr_value);
-			D_ASSERT(value->type == duckdb_libpgquery::T_PGString);
-			string exclude_entry = value->val.str;
+			auto columnref = PGPointerCast<duckdb_libpgquery::PGColumnRef>(head->data.ptr_value);
+			auto fields = columnref->fields;
+			if (fields->length < 1) {
+				throw InternalException("Unexpected field length");
+			}
+			string exclude_entry;
+			for (auto node = fields->head; node; node = node->next) {
+				if (!exclude_entry.empty()) {
+					exclude_entry += ".";
+				}
+				exclude_entry += PGPointerCast<duckdb_libpgquery::PGValue>(node->data.ptr_value)->val.str;
+			}
 			if (result->exclude_list.find(exclude_entry) != result->exclude_list.end()) {
 				throw ParserException("Duplicate entry \"%s\" in EXCLUDE list", exclude_entry);
 			}
