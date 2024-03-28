@@ -46,7 +46,7 @@ class TestTypes(object):
 				small_enum,
 				medium_enum,
 				large_enum,
-				'union',
+				"union",
 				fixed_int_array, 
 				fixed_varchar_array, 
 				fixed_nested_int_array,

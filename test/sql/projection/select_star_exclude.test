@@ -83,6 +83,21 @@ SELECT i1.* EXCLUDE (i, j), i2.* EXCLUDE (k) FROM integers i1, integers i2
 ----
 3	1	2
 
+query IIIII
+SELECT * EXCLUDE i1.i FROM integers i1, integers i2
+----
+2	3	1	2	3
+
+query IIII
+SELECT * EXCLUDE (i1.i, i2.k) FROM integers i1, integers i2
+----
+2	3	1	2
+
+query III
+SELECT * EXCLUDE (i1.i, i2.i, i2.k,) FROM integers i1, integers i2
+----
+2	3	2
+
 query IIII
 SELECT * EXCLUDE (i) FROM integers i1 JOIN integers i2 USING (i)
 ----
@@ -101,3 +116,25 @@ SELECT * EXCLUDE (blabla) FROM integers
 statement error
 SELECT integers.* EXCLUDE (blabla) FROM integers
 ----
+
+# special fields
+statement ok
+CREATE TABLE special_field("with space" INTEGER, "table" INTEGER, "union" INTEGER)
+
+statement ok
+INSERT INTO special_field VALUES (1, 2, 3)
+
+query II
+SELECT * EXCLUDE "with space" FROM special_field
+----
+2	3
+
+query I
+SELECT * EXCLUDE ("with space", "table") FROM special_field
+----
+3
+
+query I
+SELECT * EXCLUDE ("table", "union",) FROM special_field
+----
+1
