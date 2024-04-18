@@ -319,19 +319,18 @@ void ParquetWriter::SetSchemaProperties(const LogicalType &duckdb_type,
 
 uint32_t ParquetWriter::Write(const duckdb_apache::thrift::TBase &object) {
 	if (encryption_config) {
-		return ParquetCrypto::Write(object, *protocol, encryption_config->GetFooterKey());
-	} else {
-		return object.write(protocol.get());
+		return ParquetCrypto::Write(object, *protocol, encryption_config->GetFooterKey(), aes_state->CreateAesState());
 	}
+	return object.write(protocol.get());
 }
 
 uint32_t ParquetWriter::WriteData(const const_data_ptr_t buffer, const uint32_t buffer_size) {
 	if (encryption_config) {
-		return ParquetCrypto::WriteData(*protocol, buffer, buffer_size, encryption_config->GetFooterKey());
-	} else {
-		protocol->getTransport()->write(buffer, buffer_size);
-		return buffer_size;
+		return ParquetCrypto::WriteData(*protocol, buffer, buffer_size, encryption_config->GetFooterKey(),
+		                                aes_state->CreateAesState());
 	}
+	protocol->getTransport()->write(buffer, buffer_size);
+	return buffer_size;
 }
 
 void VerifyUniqueNames(const vector<string> &names) {
@@ -347,18 +346,26 @@ void VerifyUniqueNames(const vector<string> &names) {
 #endif
 }
 
-ParquetWriter::ParquetWriter(FileSystem &fs, string file_name_p, vector<LogicalType> types_p, vector<string> names_p,
-                             CompressionCodec::type codec, ChildFieldIDs field_ids_p,
+ParquetWriter::ParquetWriter(FileSystem &fs, ClientContext &context_p, string file_name_p, vector<LogicalType> types_p,
+                             vector<string> names_p, CompressionCodec::type codec, ChildFieldIDs field_ids_p,
                              const vector<pair<string, string>> &kv_metadata,
                              shared_ptr<ParquetEncryptionConfig> encryption_config_p,
                              double dictionary_compression_ratio_threshold_p)
     : file_name(std::move(file_name_p)), sql_types(std::move(types_p)), column_names(std::move(names_p)), codec(codec),
       field_ids(std::move(field_ids_p)), encryption_config(std::move(encryption_config_p)),
       dictionary_compression_ratio_threshold(dictionary_compression_ratio_threshold_p) {
-	// initialize the file writer
+
 	writer = make_uniq<BufferedFileWriter>(fs, file_name.c_str(),
 	                                       FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
+
 	if (encryption_config) {
+		// set pointer to factory method for AES state
+		auto &config = DBConfig::GetConfig(context_p);
+		if (!config.options.parquet_use_openssl) {
+			aes_state = make_shared<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
+		} else {
+			aes_state = config.encryption_state;
+		}
 		// encrypted parquet files start with the string "PARE"
 		writer->WriteData(const_data_ptr_cast("PARE"), 4);
 		// we only support this one for now, not "AES_GCM_CTR_V1"
@@ -503,15 +510,19 @@ void ParquetWriter::Flush(ColumnDataCollection &buffer) {
 
 void ParquetWriter::Finalize() {
 	auto start_offset = writer->GetTotalWritten();
+
 	if (encryption_config) {
 		// Crypto metadata is written unencrypted
 		FileCryptoMetaData crypto_metadata;
-		duckdb_parquet::format::AesGcmV1 aes_gcm_v1;
 		duckdb_parquet::format::EncryptionAlgorithm alg;
+		// For now, we only support AES-GCM
+		duckdb_parquet::format::AesGcmV1 aes_gcm_v1;
 		alg.__set_AES_GCM_V1(aes_gcm_v1);
+
 		crypto_metadata.__set_encryption_algorithm(alg);
 		crypto_metadata.write(protocol.get());
 	}
+
 	Write(file_meta_data);
 
 	writer->Write<uint32_t>(writer->GetTotalWritten() - start_offset);

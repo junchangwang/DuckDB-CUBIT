@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "duckdb/common/aes_state.hpp"
 #include "duckdb/common/allocator.hpp"
 #include "duckdb/common/case_insensitive_map.hpp"
 #include "duckdb/common/common.hpp"
@@ -102,6 +103,8 @@ struct DBConfigOptions {
 	bool use_direct_io = false;
 	//! Whether extensions should be loaded on start-up
 	bool load_extensions = true;
+	//! Force to use mbedtls for encryption
+	bool parquet_use_openssl = false;
 #ifdef DUCKDB_EXTENSION_AUTOLOAD_DEFAULT
 	//! Whether known extensions are allowed to be automatically loaded when a query depends on them
 	bool autoload_known_extensions = DUCKDB_EXTENSION_AUTOLOAD_DEFAULT;
@@ -246,6 +249,8 @@ public:
 	shared_ptr<BufferManager> buffer_manager;
 	//! Set of callbacks that can be installed by extensions
 	vector<unique_ptr<ExtensionCallback>> extension_callbacks;
+	//! AES state for en/decryption
+	shared_ptr<AESStateFactory> encryption_state;
 
 public:
 	DUCKDB_API static DBConfig &GetConfig(ClientContext &context);

@@ -1,36 +1,26 @@
 #include "parquet_reader.hpp"
-
-#include "boolean_column_reader.hpp"
-#include "callback_column_reader.hpp"
+#include "mbedtls_wrapper.hpp"
 #include "cast_column_reader.hpp"
 #include "column_reader.hpp"
-#include "duckdb.hpp"
 #include "list_column_reader.hpp"
 #include "parquet_crypto.hpp"
 #include "parquet_file_metadata_cache.hpp"
-#include "parquet_statistics.hpp"
-#include "parquet_timestamp.hpp"
 #include "row_number_column_reader.hpp"
-#include "string_column_reader.hpp"
 #include "struct_column_reader.hpp"
-#include "templated_column_reader.hpp"
 #include "thrift_tools.hpp"
 #ifndef DUCKDB_AMALGAMATION
 #include "duckdb/common/file_system.hpp"
-#include "duckdb/common/hive_partitioning.hpp"
 #include "duckdb/common/pair.hpp"
 #include "duckdb/common/string_util.hpp"
 #include "duckdb/common/types/date.hpp"
 #include "duckdb/common/vector_operations/vector_operations.hpp"
 #include "duckdb/planner/filter/conjunction_filter.hpp"
 #include "duckdb/planner/filter/constant_filter.hpp"
-#include "duckdb/planner/filter/null_filter.hpp"
 #include "duckdb/planner/filter/struct_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
 #include "duckdb/storage/object_cache.hpp"
 #endif
 
-#include <cassert>
 #include <chrono>
 #include <cstring>
 #include <sstream>
@@ -53,9 +43,9 @@ CreateThriftFileProtocol(Allocator &allocator, FileHandle &file_handle, bool pre
 	return make_uniq<duckdb_apache::thrift::protocol::TCompactProtocolT<ThriftFileTransport>>(std::move(transport));
 }
 
-static shared_ptr<ParquetFileMetadataCache>
-LoadMetadata(Allocator &allocator, FileHandle &file_handle,
-             const shared_ptr<const ParquetEncryptionConfig> &encryption_config) {
+static shared_ptr<ParquetFileMetadataCache> LoadMetadata(Allocator &allocator, FileHandle &file_handle,
+                                                         const shared_ptr<ParquetEncryptionConfig> &encryption_config,
+                                                         shared_ptr<AESStateFactory> const &aes_state) {
 	auto current_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
 	auto file_proto = CreateThriftFileProtocol(allocator, file_handle, false);
@@ -107,7 +97,9 @@ LoadMetadata(Allocator &allocator, FileHandle &file_handle,
 			throw InvalidInputException("File '%s' is encrypted with AES_GCM_CTR_V1, but only AES_GCM_V1 is supported",
 			                            file_handle.path);
 		}
-		ParquetCrypto::Read(*metadata, *file_proto, encryption_config->GetFooterKey());
+		if (encryption_config) {
+			ParquetCrypto::Read(*metadata, *file_proto, encryption_config->GetFooterKey(), aes_state->CreateAesState());
+		}
 	} else {
 		metadata->read(file_proto.get());
 	}
@@ -426,6 +418,7 @@ void ParquetReader::InitializeSchema() {
 	auto file_meta_data = GetFileMetadata();
 
 	if (file_meta_data->__isset.encryption_algorithm) {
+		// throw error if wrong encryption algorithm is set
 		if (file_meta_data->encryption_algorithm.__isset.AES_GCM_CTR_V1) {
 			throw InvalidInputException("File '%s' is encrypted with AES_GCM_CTR_V1, but only AES_GCM_V1 is supported",
 			                            file_name);
@@ -484,6 +477,7 @@ ParquetColumnDefinition ParquetColumnDefinition::FromSchemaValue(ClientContext &
 ParquetReader::ParquetReader(ClientContext &context_p, string file_name_p, ParquetOptions parquet_options_p)
     : fs(FileSystem::GetFileSystem(context_p)), allocator(BufferAllocator::Get(context_p)),
       parquet_options(std::move(parquet_options_p)) {
+
 	file_name = std::move(file_name_p);
 	file_handle = fs.OpenFile(file_name, FileFlags::FILE_FLAGS_READ);
 	if (!file_handle->CanSeek()) {
@@ -491,16 +485,25 @@ ParquetReader::ParquetReader(ClientContext &context_p, string file_name_p, Parqu
 		    "Reading parquet files from a FIFO stream is not supported and cannot be efficiently supported since "
 		    "metadata is located at the end of the file. Write the stream to disk first and read from there instead.");
 	}
+
+	// set pointer to factory method for AES state
+	auto &config = DBConfig::GetConfig(context_p);
+	if (!config.options.parquet_use_openssl) {
+		aes_state = make_shared<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
+	} else {
+		aes_state = config.encryption_state;
+	}
+
 	// If object cached is disabled
 	// or if this file has cached metadata
 	// or if the cached version already expired
 	if (!ObjectCache::ObjectCacheEnabled(context_p)) {
-		metadata = LoadMetadata(allocator, *file_handle, parquet_options.encryption_config);
+		metadata = LoadMetadata(allocator, *file_handle, parquet_options.encryption_config, aes_state);
 	} else {
 		auto last_modify_time = fs.GetLastModifiedTime(*file_handle);
 		metadata = ObjectCache::GetObjectCache(context_p).Get<ParquetFileMetadataCache>(file_name);
 		if (!metadata || (last_modify_time + 10 >= metadata->read_time)) {
-			metadata = LoadMetadata(allocator, *file_handle, parquet_options.encryption_config);
+			metadata = LoadMetadata(allocator, *file_handle, parquet_options.encryption_config, aes_state);
 			ObjectCache::GetObjectCache(context_p).Put(file_name, metadata);
 		}
 	}
@@ -555,19 +558,20 @@ unique_ptr<BaseStatistics> ParquetReader::ReadStatistics(const string &name) {
 
 uint32_t ParquetReader::Read(duckdb_apache::thrift::TBase &object, TProtocol &iprot) {
 	if (parquet_options.encryption_config) {
-		return ParquetCrypto::Read(object, iprot, parquet_options.encryption_config->GetFooterKey());
-	} else {
-		return object.read(&iprot);
+		return ParquetCrypto::Read(object, iprot, parquet_options.encryption_config->GetFooterKey(),
+		                           aes_state->CreateAesState());
 	}
+	return object.read(&iprot);
 }
 
 uint32_t ParquetReader::ReadData(duckdb_apache::thrift::protocol::TProtocol &iprot, const data_ptr_t buffer,
                                  const uint32_t buffer_size) {
 	if (parquet_options.encryption_config) {
-		return ParquetCrypto::ReadData(iprot, buffer, buffer_size, parquet_options.encryption_config->GetFooterKey());
-	} else {
-		return iprot.getTransport()->read(buffer, buffer_size);
+		return ParquetCrypto::ReadData(iprot, buffer, buffer_size, parquet_options.encryption_config->GetFooterKey(),
+		                               aes_state->CreateAesState());
 	}
+
+	return iprot.getTransport()->read(buffer, buffer_size);
 }
 
 const ParquetRowGroup &ParquetReader::GetGroup(ParquetReaderScanState &state) {

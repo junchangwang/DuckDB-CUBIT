@@ -21,6 +21,7 @@
 #include "duckdb/planner/filter/null_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
 #endif
+#include "duckdb/common/aes_state.hpp"
 #include "column_reader.hpp"
 #include "parquet_file_metadata_cache.hpp"
 #include "parquet_rle_bp_decoder.hpp"
@@ -113,6 +114,8 @@ public:
 	ParquetOptions parquet_options;
 	MultiFileReaderData reader_data;
 	unique_ptr<ColumnReader> root_reader;
+	// pointer to aes state for en/decryption
+	shared_ptr<AESStateFactory> aes_state;
 
 	//! Index of the file_row_number column
 	idx_t file_row_number_idx = DConstants::INVALID_INDEX;

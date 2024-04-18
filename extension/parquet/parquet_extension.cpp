@@ -1030,8 +1030,8 @@ unique_ptr<GlobalFunctionData> ParquetWriteInitializeGlobal(ClientContext &conte
 
 	auto &fs = FileSystem::GetFileSystem(context);
 	global_state->writer =
-	    make_uniq<ParquetWriter>(fs, file_path, parquet_bind.sql_types, parquet_bind.column_names, parquet_bind.codec,
-	                             parquet_bind.field_ids.Copy(), parquet_bind.kv_metadata,
+	    make_uniq<ParquetWriter>(fs, context, file_path, parquet_bind.sql_types, parquet_bind.column_names,
+	                             parquet_bind.codec, parquet_bind.field_ids.Copy(), parquet_bind.kv_metadata,
 	                             parquet_bind.encryption_config, parquet_bind.dictionary_compression_ratio_threshold);
 	return std::move(global_state);
 }

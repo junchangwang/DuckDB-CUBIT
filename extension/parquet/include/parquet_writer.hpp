@@ -18,6 +18,7 @@
 #include "duckdb/function/copy_function.hpp"
 #endif
 
+#include "duckdb/common/aes_state.hpp"
 #include "column_writer.hpp"
 #include "parquet_types.h"
 #include "thrift/protocol/TCompactProtocol.h"
@@ -61,8 +62,8 @@ struct FieldID {
 
 class ParquetWriter {
 public:
-	ParquetWriter(FileSystem &fs, string file_name, vector<LogicalType> types, vector<string> names,
-	              duckdb_parquet::format::CompressionCodec::type codec, ChildFieldIDs field_ids,
+	ParquetWriter(FileSystem &fs, ClientContext &context_p, string file_name, vector<LogicalType> types,
+	              vector<string> names, duckdb_parquet::format::CompressionCodec::type codec, ChildFieldIDs field_ids,
 	              const vector<pair<string, string>> &kv_metadata,
 	              shared_ptr<ParquetEncryptionConfig> encryption_config, double dictionary_compression_ratio_threshold);
 
@@ -110,6 +111,7 @@ private:
 	ChildFieldIDs field_ids;
 	shared_ptr<ParquetEncryptionConfig> encryption_config;
 	double dictionary_compression_ratio_threshold;
+	shared_ptr<AESStateFactory> aes_state;
 
 	unique_ptr<BufferedFileWriter> writer;
 	shared_ptr<duckdb_apache::thrift::protocol::TProtocol> protocol;

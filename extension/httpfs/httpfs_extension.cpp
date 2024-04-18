@@ -5,6 +5,7 @@
 #include "create_secret_functions.hpp"
 #include "duckdb.hpp"
 #include "s3fs.hpp"
+#include "crypto.hpp"
 
 namespace duckdb {
 
@@ -59,6 +60,10 @@ static void LoadInternal(DatabaseInstance &instance) {
 	provider->SetAll();
 
 	CreateS3SecretFunctions::Register(instance);
+
+	// set parquet_use_openssl to true when httpfs is loaded
+	config.options.parquet_use_openssl = true;
+	config.encryption_state = make_shared<AESGCMStateSSLFactory>();
 }
 
 void HttpfsExtension::Load(DuckDB &db) {

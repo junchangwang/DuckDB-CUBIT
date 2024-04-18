@@ -99,8 +99,10 @@ static const ConfigurationOption internal_options[] = {
     DUCKDB_GLOBAL(MaximumMemorySetting),
     DUCKDB_GLOBAL(MaximumTempDirectorySize),
     DUCKDB_GLOBAL(OldImplicitCasting),
+    DUCKDB_GLOBAL(OpenSSLSetting),
     DUCKDB_GLOBAL_ALIAS("memory_limit", MaximumMemorySetting),
     DUCKDB_GLOBAL_ALIAS("null_order", DefaultNullOrderSetting),
+    DUCKDB_GLOBAL_ALIAS("parquet_use_openssl", OpenSSLSetting),
     DUCKDB_LOCAL(OrderedAggregateThreshold),
     DUCKDB_GLOBAL(PasswordSetting),
     DUCKDB_LOCAL(PerfectHashThresholdSetting),
@@ -380,7 +382,7 @@ idx_t DBConfig::ParseMemoryLimit(const string &arg) {
 		idx++;
 	}
 	if (idx == num_start) {
-		throw ParserException("Memory limit must have a number (e.g. SET memory_limit=1GB");
+		throw ParserException("Memory limit must have a number (e.g. SET memory_limit=1GB)");
 	}
 	string number = arg.substr(num_start, idx - num_start);
 
