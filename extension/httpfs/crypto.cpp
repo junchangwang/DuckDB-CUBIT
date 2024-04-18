@@ -7,7 +7,6 @@
 #define CPPHTTPLIB_OPENSSL_SUPPORT
 #include "httplib.hpp"
 
-
 namespace duckdb {
 
 void sha256(const char *in, size_t in_len, hash_bytes &out) {

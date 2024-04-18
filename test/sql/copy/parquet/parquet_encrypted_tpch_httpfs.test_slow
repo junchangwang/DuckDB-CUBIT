@@ -1,4 +1,4 @@
-# name: test/sql/copy/parquet/parquet_encryption_tpch_httpfs.test_slow
+# name: test/sql/copy/parquet/parquet_encrypted_tpch_httpfs.test_slow
 # description: Test Parquet encryption with OpenSSL for TPC-H
 # group: [parquet]
 
