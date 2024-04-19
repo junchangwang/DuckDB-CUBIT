@@ -58,6 +58,8 @@ private:
 	string footer_key;
 	//! Mapping from column name to key name
 	unordered_map<string, string> column_keys;
+	// use openssl setting
+	bool debug_use_openssl;
 };
 
 class ParquetCrypto {

@@ -68,18 +68,20 @@ shared_ptr<ParquetEncryptionConfig> ParquetEncryptionConfig::Deserialize(Deseria
 void ParquetOptions::Serialize(Serializer &serializer) const {
 	serializer.WritePropertyWithDefault<bool>(100, "binary_as_string", binary_as_string);
 	serializer.WritePropertyWithDefault<bool>(101, "file_row_number", file_row_number);
-	serializer.WriteProperty<MultiFileReaderOptions>(102, "file_options", file_options);
-	serializer.WritePropertyWithDefault<vector<ParquetColumnDefinition>>(103, "schema", schema);
-	serializer.WritePropertyWithDefault<shared_ptr<ParquetEncryptionConfig>>(104, "encryption_config", encryption_config, nullptr);
+	serializer.WritePropertyWithDefault<bool>(102, "debug_use_openssl", debug_use_openssl);
+	serializer.WriteProperty<MultiFileReaderOptions>(103, "file_options", file_options);
+	serializer.WritePropertyWithDefault<vector<ParquetColumnDefinition>>(104, "schema", schema);
+	serializer.WritePropertyWithDefault<shared_ptr<ParquetEncryptionConfig>>(105, "encryption_config", encryption_config, nullptr);
 }
 
 ParquetOptions ParquetOptions::Deserialize(Deserializer &deserializer) {
 	ParquetOptions result;
 	deserializer.ReadPropertyWithDefault<bool>(100, "binary_as_string", result.binary_as_string);
 	deserializer.ReadPropertyWithDefault<bool>(101, "file_row_number", result.file_row_number);
-	deserializer.ReadProperty<MultiFileReaderOptions>(102, "file_options", result.file_options);
-	deserializer.ReadPropertyWithDefault<vector<ParquetColumnDefinition>>(103, "schema", result.schema);
-	deserializer.ReadPropertyWithDefault<shared_ptr<ParquetEncryptionConfig>>(104, "encryption_config", result.encryption_config, nullptr);
+	deserializer.ReadPropertyWithDefault<bool>(102, "debug_use_openssl", result.debug_use_openssl);
+	deserializer.ReadProperty<MultiFileReaderOptions>(103, "file_options", result.file_options);
+	deserializer.ReadPropertyWithDefault<vector<ParquetColumnDefinition>>(104, "schema", result.schema);
+	deserializer.ReadPropertyWithDefault<shared_ptr<ParquetEncryptionConfig>>(105, "encryption_config", result.encryption_config, nullptr);
 	return result;
 }
 

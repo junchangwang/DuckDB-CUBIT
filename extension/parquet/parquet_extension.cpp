@@ -130,6 +130,7 @@ struct ParquetWriteBindData : public TableFunctionData {
 
 	//! How/Whether to encrypt the data
 	shared_ptr<ParquetEncryptionConfig> encryption_config;
+	bool debug_use_openssl = true;
 
 	//! Dictionary compression is applied only if the compression ratio exceeds this threshold
 	double dictionary_compression_ratio_threshold = 1.0;
@@ -1011,6 +1012,15 @@ unique_ptr<FunctionData> ParquetWriteBind(ClientContext &context, CopyFunctionBi
 				                      "dictionary compression");
 			}
 			bind_data->dictionary_compression_ratio_threshold = val;
+		} else if (loption == "debug_use_openssl") {
+			auto val = StringUtil::Lower(option.second[0].GetValue<std::string>());
+			if (val == "false") {
+				bind_data->debug_use_openssl = false;
+			} else if (val == "true") {
+				bind_data->debug_use_openssl = true;
+			} else {
+				throw BinderException("Expected debug_use_openssl to be a BOOLEAN");
+			}
 		} else {
 			throw NotImplementedException("Unrecognized option for PARQUET: %s", option.first.c_str());
 		}
@@ -1036,10 +1046,10 @@ unique_ptr<GlobalFunctionData> ParquetWriteInitializeGlobal(ClientContext &conte
 	auto &parquet_bind = bind_data.Cast<ParquetWriteBindData>();
 
 	auto &fs = FileSystem::GetFileSystem(context);
-	global_state->writer =
-	    make_uniq<ParquetWriter>(fs, context, file_path, parquet_bind.sql_types, parquet_bind.column_names,
-	                             parquet_bind.codec, parquet_bind.field_ids.Copy(), parquet_bind.kv_metadata,
-	                             parquet_bind.encryption_config, parquet_bind.dictionary_compression_ratio_threshold);
+	global_state->writer = make_uniq<ParquetWriter>(
+	    fs, context, file_path, parquet_bind.sql_types, parquet_bind.column_names, parquet_bind.codec,
+	    parquet_bind.field_ids.Copy(), parquet_bind.kv_metadata, parquet_bind.encryption_config,
+	    parquet_bind.dictionary_compression_ratio_threshold, parquet_bind.debug_use_openssl);
 	return std::move(global_state);
 }
 
