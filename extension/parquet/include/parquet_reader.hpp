@@ -21,8 +21,8 @@
 #include "duckdb/planner/filter/null_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
 #endif
-#include "duckdb/common/aes_state.hpp"
 #include "column_reader.hpp"
+#include "duckdb/common/encryption_state.hpp"
 #include "parquet_file_metadata_cache.hpp"
 #include "parquet_rle_bp_decoder.hpp"
 #include "parquet_types.h"

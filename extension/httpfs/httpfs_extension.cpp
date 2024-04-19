@@ -63,7 +63,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 	// set parquet_use_openssl to true when httpfs is loaded
 	config.options.parquet_use_openssl = true;
-	config.encryption_state = make_shared<AESGCMStateSSLFactory>();
+	config.encryption_state = make_shared_ptr<AESGCMStateSSLFactory>();
 }
 
 void HttpfsExtension::Load(DuckDB &db) {

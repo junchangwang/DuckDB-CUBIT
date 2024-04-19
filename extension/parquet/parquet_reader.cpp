@@ -99,7 +99,8 @@ static shared_ptr<ParquetFileMetadataCache> LoadMetadata(Allocator &allocator, F
 			                            file_handle.path);
 		}
 		if (encryption_config) {
-			ParquetCrypto::Read(*metadata, *file_proto, encryption_config->GetFooterKey(), aes_state->CreateAesState());
+			ParquetCrypto::Read(*metadata, *file_proto, encryption_config->GetFooterKey(),
+			                    aes_state->CreateEncryptionState());
 		}
 	} else {
 		metadata->read(file_proto.get());
@@ -490,7 +491,7 @@ ParquetReader::ParquetReader(ClientContext &context_p, string file_name_p, Parqu
 	// set pointer to factory method for AES state
 	auto &config = DBConfig::GetConfig(context_p);
 	if (!config.options.parquet_use_openssl) {
-		aes_state = make_shared<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
+		aes_state = make_shared_ptr<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
 	} else {
 		aes_state = config.encryption_state;
 	}
@@ -560,7 +561,7 @@ unique_ptr<BaseStatistics> ParquetReader::ReadStatistics(const string &name) {
 uint32_t ParquetReader::Read(duckdb_apache::thrift::TBase &object, TProtocol &iprot) {
 	if (parquet_options.encryption_config) {
 		return ParquetCrypto::Read(object, iprot, parquet_options.encryption_config->GetFooterKey(),
-		                           aes_state->CreateAesState());
+		                           aes_state->CreateEncryptionState());
 	}
 	return object.read(&iprot);
 }
@@ -569,7 +570,7 @@ uint32_t ParquetReader::ReadData(duckdb_apache::thrift::protocol::TProtocol &ipr
                                  const uint32_t buffer_size) {
 	if (parquet_options.encryption_config) {
 		return ParquetCrypto::ReadData(iprot, buffer, buffer_size, parquet_options.encryption_config->GetFooterKey(),
-		                               aes_state->CreateAesState());
+		                               aes_state->CreateEncryptionState());
 	}
 
 	return iprot.getTransport()->read(buffer, buffer_size);

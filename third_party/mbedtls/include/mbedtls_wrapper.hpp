@@ -8,7 +8,7 @@
 
 #pragma once
 
-#include "duckdb/common/aes_state.hpp"
+#include "duckdb/common/encryption_state.hpp"
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/typedefs.hpp"
 
@@ -40,7 +40,7 @@ public:
 		void *sha_context;
 	};
 
-	class AESGCMStateMBEDTLS : public duckdb::AESGCMState {
+	class AESGCMStateMBEDTLS : public duckdb::EncryptionState {
 	public:
 		DUCKDB_API explicit AESGCMStateMBEDTLS();
 		DUCKDB_API ~AESGCMStateMBEDTLS() override;
@@ -58,17 +58,17 @@ public:
 	public:
 		static constexpr size_t BLOCK_SIZE = 16;
 		const std::string lib = "mbedtls";
-		static constexpr bool SSL = false;
 
 	private:
+		bool ssl = false;
 		void *gcm_context;
 	};
 };
 
 class AESGCMStateMBEDTLSFactory : public duckdb::EncryptionUtil {
 public:
-	duckdb::shared_ptr<duckdb::AESGCMState> CreateAesState() const override {
-		return duckdb::shared_ptr<MbedTlsWrapper::AESGCMStateMBEDTLS>(new MbedTlsWrapper::AESGCMStateMBEDTLS());
+	duckdb::shared_ptr<duckdb::EncryptionState> CreateEncryptionState() const override {
+		return duckdb::make_shared_ptr<MbedTlsWrapper::AESGCMStateMBEDTLS>();
 	}
 
 	~AESGCMStateMBEDTLSFactory() override {} //

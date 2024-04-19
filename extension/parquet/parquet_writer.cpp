@@ -319,7 +319,8 @@ void ParquetWriter::SetSchemaProperties(const LogicalType &duckdb_type,
 
 uint32_t ParquetWriter::Write(const duckdb_apache::thrift::TBase &object) {
 	if (encryption_config) {
-		return ParquetCrypto::Write(object, *protocol, encryption_config->GetFooterKey(), aes_state->CreateAesState());
+		return ParquetCrypto::Write(object, *protocol, encryption_config->GetFooterKey(),
+		                            aes_state->CreateEncryptionState());
 	}
 	return object.write(protocol.get());
 }
@@ -327,7 +328,7 @@ uint32_t ParquetWriter::Write(const duckdb_apache::thrift::TBase &object) {
 uint32_t ParquetWriter::WriteData(const const_data_ptr_t buffer, const uint32_t buffer_size) {
 	if (encryption_config) {
 		return ParquetCrypto::WriteData(*protocol, buffer, buffer_size, encryption_config->GetFooterKey(),
-		                                aes_state->CreateAesState());
+		                                aes_state->CreateEncryptionState());
 	}
 	protocol->getTransport()->write(buffer, buffer_size);
 	return buffer_size;
@@ -362,7 +363,7 @@ ParquetWriter::ParquetWriter(FileSystem &fs, ClientContext &context_p, string fi
 		// set pointer to factory method for AES state
 		auto &config = DBConfig::GetConfig(context_p);
 		if (!config.options.parquet_use_openssl) {
-			aes_state = make_shared<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
+			aes_state = make_shared_ptr<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
 		} else {
 			aes_state = config.encryption_state;
 		}

@@ -174,7 +174,7 @@ const std::string MbedTlsWrapper::AESGCMStateMBEDTLS::GetLib() {
 }
 
 bool MbedTlsWrapper::AESGCMStateMBEDTLS::IsOpenSSL() {
-	return SSL;
+	return ssl;
 }
 
 

@@ -18,8 +18,8 @@
 #include "duckdb/function/copy_function.hpp"
 #endif
 
-#include "duckdb/common/aes_state.hpp"
 #include "column_writer.hpp"
+#include "duckdb/common/encryption_state.hpp"
 #include "parquet_types.h"
 #include "thrift/protocol/TCompactProtocol.h"
 
