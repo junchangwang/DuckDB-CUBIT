@@ -490,7 +490,7 @@ ParquetReader::ParquetReader(ClientContext &context_p, string file_name_p, Parqu
 
 	// set pointer to factory method for AES state
 	auto &config = DBConfig::GetConfig(context_p);
-	if (config.encryption_state && parquet_options_p.debug_use_openssl) {
+	if (config.encryption_state && parquet_options.debug_use_openssl) {
 		aes_state = config.encryption_state;
 	} else {
 		aes_state = make_shared_ptr<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
