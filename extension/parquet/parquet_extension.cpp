@@ -1323,8 +1323,6 @@ void ParquetExtension::Load(DuckDB &db) {
 	config.replacement_scans.emplace_back(ParquetScanReplacement);
 	config.AddExtensionOption("binary_as_string", "In Parquet files, interpret binary data as a string.",
 	                          LogicalType::BOOLEAN);
-	config.AddExtensionOption("debug_use_openssl", "Explicitly en/disable OpenSSL for Parquet encryption.",
-	                          LogicalType::BOOLEAN);
 }
 
 std::string ParquetExtension::Name() {
