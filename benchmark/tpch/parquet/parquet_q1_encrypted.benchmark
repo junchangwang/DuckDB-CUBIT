@@ -12,7 +12,6 @@ require parquet
 require tpch
 
 load
-SET parquet_use_openssl = true;
 CALL dbgen(sf=1, suffix='_normal');
 PRAGMA add_parquet_key('key256', '01234567891123450123456789112345');
 COPY lineitem_normal TO '${BENCHMARK_DIR}/lineitem_encrypted.parquet' (ENCRYPTION_CONFIG {footer_key: 'key256'});

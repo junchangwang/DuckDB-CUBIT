@@ -61,8 +61,7 @@ static void LoadInternal(DatabaseInstance &instance) {
 
 	CreateS3SecretFunctions::Register(instance);
 
-	// set parquet_use_openssl to true when httpfs is loaded
-	config.options.parquet_use_openssl = true;
+	// set pointer to OpenSSL encryption state
 	config.encryption_state = make_shared_ptr<AESGCMStateSSLFactory>();
 }
 

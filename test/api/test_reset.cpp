@@ -129,7 +129,6 @@ bool OptionIsExcludedFromTest(const string &name) {
 	    "allow_unsigned_extensions", // cant change this while db is running
 	    "allow_unredacted_secrets",  // cant change this while db is running
 	    "log_query_path",
-	    "parquet_use_openssl", // always returns false if httpfs is not loaded
 	    "password",
 	    "username",
 	    "user",

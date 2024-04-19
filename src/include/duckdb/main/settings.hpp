@@ -481,15 +481,6 @@ struct MaximumTempDirectorySize {
 	static Value GetSetting(const ClientContext &context);
 };
 
-struct OpenSSLSetting {
-	static constexpr const char *Name = "parquet_use_openssl";
-	static constexpr const char *Description = "Use openSSL for parquet en/decryption if httpfs extension is loaded";
-	static constexpr const LogicalTypeId InputType = LogicalTypeId::BOOLEAN;
-	static void SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &parameter);
-	static void ResetGlobal(DatabaseInstance *db, DBConfig &config);
-	static Value GetSetting(const ClientContext &context);
-};
-
 struct OldImplicitCasting {
 	static constexpr const char *Name = "old_implicit_casting";
 	static constexpr const char *Description = "Allow implicit casting to/from VARCHAR";

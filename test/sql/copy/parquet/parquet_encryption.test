@@ -7,11 +7,6 @@ require parquet
 # parquet keys are not persisted across restarts
 require noforcestorage
 
-statement error
-SET parquet_use_openssl = true;
-----
-Invalid Input Error: Httpfs extension not loaded. Using default mbedtls for en/decryption
-
 statement ok
 PRAGMA enable_verification
 

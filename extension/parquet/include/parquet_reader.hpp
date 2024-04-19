@@ -89,6 +89,7 @@ struct ParquetOptions {
 	bool binary_as_string = false;
 	bool file_row_number = false;
 	shared_ptr<ParquetEncryptionConfig> encryption_config;
+	bool debug_use_openssl = true;
 
 	MultiFileReaderOptions file_options;
 	vector<ParquetColumnDefinition> schema;

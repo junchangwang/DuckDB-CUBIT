@@ -103,8 +103,6 @@ struct DBConfigOptions {
 	bool use_direct_io = false;
 	//! Whether extensions should be loaded on start-up
 	bool load_extensions = true;
-	//! Force to use mbedtls for encryption
-	bool parquet_use_openssl = false;
 #ifdef DUCKDB_EXTENSION_AUTOLOAD_DEFAULT
 	//! Whether known extensions are allowed to be automatically loaded when a query depends on them
 	bool autoload_known_extensions = DUCKDB_EXTENSION_AUTOLOAD_DEFAULT;

@@ -360,12 +360,13 @@ ParquetWriter::ParquetWriter(FileSystem &fs, ClientContext &context_p, string fi
 	                                       FileFlags::FILE_FLAGS_WRITE | FileFlags::FILE_FLAGS_FILE_CREATE_NEW);
 
 	if (encryption_config) {
-		// set pointer to factory method for AES state
 		auto &config = DBConfig::GetConfig(context_p);
-		if (!config.options.parquet_use_openssl) {
-			aes_state = make_shared_ptr<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
-		} else {
+		// also do the parquet options writer
+		if (config.encryption_state) {
+			// Use OpenSSL
 			aes_state = config.encryption_state;
+		} else {
+			aes_state = make_shared_ptr<duckdb_mbedtls::AESGCMStateMBEDTLSFactory>();
 		}
 		// encrypted parquet files start with the string "PARE"
 		writer->WriteData(const_data_ptr_cast("PARE"), 4);

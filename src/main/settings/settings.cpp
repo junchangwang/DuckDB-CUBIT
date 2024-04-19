@@ -1034,39 +1034,6 @@ Value MaximumTempDirectorySize::GetSetting(const ClientContext &context) {
 }
 
 //===--------------------------------------------------------------------===//
-// Parquet use OpenSSL
-//===--------------------------------------------------------------------===//
-void OpenSSLSetting::SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &input) {
-	auto setting = input.GetValue<bool>();
-
-	if (!setting) {
-		config.options.parquet_use_openssl = false;
-		return;
-	}
-
-	// Check if the httpfs extension is loaded
-	if (db && db->ExtensionIsLoaded("httpfs")) {
-		config.options.parquet_use_openssl = true;
-	} else {
-		throw InvalidInputException("Httpfs extension not loaded. Using default mbedtls for en/decryption");
-	}
-}
-
-void OpenSSLSetting::ResetGlobal(DatabaseInstance *db, DBConfig &config) {
-	// if httpfs is loaded then set to true
-	if (db && db->ExtensionIsLoaded("httpfs")) {
-		config.options.parquet_use_openssl = true;
-	} else {
-		config.options.parquet_use_openssl = DBConfig().options.parquet_use_openssl;
-	}
-}
-
-Value OpenSSLSetting::GetSetting(const ClientContext &context) {
-	auto &config = DBConfig::GetConfig(context);
-	return Value::BOOLEAN(config.options.parquet_use_openssl);
-}
-
-//===--------------------------------------------------------------------===//
 // Old Implicit Casting
 //===--------------------------------------------------------------------===//
 void OldImplicitCasting::SetGlobal(DatabaseInstance *db, DBConfig &config, const Value &input) {
