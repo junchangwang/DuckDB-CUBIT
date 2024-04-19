@@ -1170,6 +1170,7 @@ static void ParquetCopySerialize(Serializer &serializer, const FunctionData &bin
 	                                                                         bind_data.encryption_config, nullptr);
 	serializer.WriteProperty(108, "dictionary_compression_ratio_threshold",
 	                         bind_data.dictionary_compression_ratio_threshold);
+	serializer.WriteProperty(109, "debug_use_openssl", bind_data.debug_use_openssl);
 }
 
 static unique_ptr<FunctionData> ParquetCopyDeserialize(Deserializer &deserializer, CopyFunction &function) {
@@ -1185,6 +1186,7 @@ static unique_ptr<FunctionData> ParquetCopyDeserialize(Deserializer &deserialize
 	                                                                          data->encryption_config, nullptr);
 	deserializer.ReadPropertyWithDefault<double>(108, "dictionary_compression_ratio_threshold",
 	                                             data->dictionary_compression_ratio_threshold, 1.0);
+	data->debug_use_openssl = deserializer.ReadPropertyWithDefault<bool>(109, "debug_use_openssl", true);
 	return std::move(data);
 }
 // LCOV_EXCL_STOP
@@ -1320,6 +1322,8 @@ void ParquetExtension::Load(DuckDB &db) {
 	auto &config = DBConfig::GetConfig(*db.instance);
 	config.replacement_scans.emplace_back(ParquetScanReplacement);
 	config.AddExtensionOption("binary_as_string", "In Parquet files, interpret binary data as a string.",
+	                          LogicalType::BOOLEAN);
+	config.AddExtensionOption("debug_use_openssl", "Explicitly en/disable OpenSSL for Parquet encryption.",
 	                          LogicalType::BOOLEAN);
 }
 
