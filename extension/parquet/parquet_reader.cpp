@@ -45,7 +45,7 @@ CreateThriftFileProtocol(Allocator &allocator, FileHandle &file_handle, bool pre
 
 static shared_ptr<ParquetFileMetadataCache> LoadMetadata(Allocator &allocator, FileHandle &file_handle,
                                                          const shared_ptr<ParquetEncryptionConfig> &encryption_config,
-                                                         shared_ptr<AESStateFactory> const &aes_state) {
+                                                         shared_ptr<EncryptionUtil> const &aes_state) {
 	auto current_time = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
 
 	auto file_proto = CreateThriftFileProtocol(allocator, file_handle, false);

@@ -250,7 +250,7 @@ public:
 	//! Set of callbacks that can be installed by extensions
 	vector<unique_ptr<ExtensionCallback>> extension_callbacks;
 	//! AES state for en/decryption
-	shared_ptr<AESStateFactory> encryption_state;
+	shared_ptr<EncryptionUtil> encryption_state;
 
 public:
 	DUCKDB_API static DBConfig &GetConfig(ClientContext &context);

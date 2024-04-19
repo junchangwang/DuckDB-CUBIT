@@ -17,9 +17,6 @@
 // does this matter?
 namespace duckdb {
 
-class ClientContext;
-class DatabaseInstance;
-
 class AESGCMState {
 
 public:
@@ -28,27 +25,27 @@ public:
 
 public:
 	DUCKDB_API virtual bool IsOpenSSL();
-	DUCKDB_API virtual void InitializeEncryption(duckdb::const_data_ptr_t iv, duckdb::idx_t iv_len,
+	DUCKDB_API virtual void InitializeEncryption(const_data_ptr_t iv, idx_t iv_len,
 	                                             const std::string *key);
-	DUCKDB_API virtual void InitializeDecryption(duckdb::const_data_ptr_t iv, duckdb::idx_t iv_len,
+	DUCKDB_API virtual void InitializeDecryption(const_data_ptr_t iv, idx_t iv_len,
 	                                             const std::string *key);
-	DUCKDB_API virtual size_t Process(duckdb::const_data_ptr_t in, duckdb::idx_t in_len, duckdb::data_ptr_t out,
-	                                  duckdb::idx_t out_len);
-	DUCKDB_API virtual size_t Finalize(duckdb::data_ptr_t out, duckdb::idx_t out_len, duckdb::data_ptr_t tag,
-	                                   duckdb::idx_t tag_len);
-	DUCKDB_API virtual void GenerateRandomData(duckdb::data_ptr_t data, duckdb::idx_t len);
+	DUCKDB_API virtual size_t Process(const_data_ptr_t in, idx_t in_len, data_ptr_t out,
+	                                  idx_t out_len);
+	DUCKDB_API virtual size_t Finalize(data_ptr_t out, idx_t out_len, data_ptr_t tag,
+	                                   idx_t tag_len);
+	DUCKDB_API virtual void GenerateRandomData(data_ptr_t data, idx_t len);
 
 public:
 	static constexpr size_t BLOCK_SIZE = 16;
 };
 
-class AESStateFactory {
+class EncryptionUtil {
 public:
 	virtual shared_ptr<AESGCMState> CreateAesState() const {
 		return shared_ptr<AESGCMState>(new AESGCMState());
 	}
 
-	virtual ~AESStateFactory() {
+	virtual ~EncryptionUtil() {
 	}
 };
 

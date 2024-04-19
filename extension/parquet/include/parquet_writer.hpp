@@ -111,7 +111,7 @@ private:
 	ChildFieldIDs field_ids;
 	shared_ptr<ParquetEncryptionConfig> encryption_config;
 	double dictionary_compression_ratio_threshold;
-	shared_ptr<AESStateFactory> aes_state;
+	shared_ptr<EncryptionUtil> aes_state;
 
 	unique_ptr<BufferedFileWriter> writer;
 	shared_ptr<duckdb_apache::thrift::protocol::TProtocol> protocol;

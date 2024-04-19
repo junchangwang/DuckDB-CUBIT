@@ -115,7 +115,7 @@ public:
 	MultiFileReaderData reader_data;
 	unique_ptr<ColumnReader> root_reader;
 	// pointer to aes state for en/decryption
-	shared_ptr<AESStateFactory> aes_state;
+	shared_ptr<EncryptionUtil> aes_state;
 
 	//! Index of the file_row_number column
 	idx_t file_row_number_idx = DConstants::INVALID_INDEX;

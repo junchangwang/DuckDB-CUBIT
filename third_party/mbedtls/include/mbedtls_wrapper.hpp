@@ -65,7 +65,7 @@ public:
 	};
 };
 
-class AESGCMStateMBEDTLSFactory : public duckdb::AESStateFactory {
+class AESGCMStateMBEDTLSFactory : public duckdb::EncryptionUtil {
 public:
 	duckdb::shared_ptr<duckdb::AESGCMState> CreateAesState() const override {
 		return duckdb::shared_ptr<MbedTlsWrapper::AESGCMStateMBEDTLS>(new MbedTlsWrapper::AESGCMStateMBEDTLS());

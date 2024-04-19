@@ -136,11 +136,8 @@ size_t AESGCMStateSSL::Finalize(data_ptr_t out, idx_t out_len, data_ptr_t tag, i
 		if (ret > 0) {
 			// success
 			return text_len;
-
-		} else {
-			throw InvalidInputException("Computed AES tag differs from read AES tag, are you using the right key?");
-			return -1;
 		}
+		throw InvalidInputException("Computed AES tag differs from read AES tag, are you using the right key?");
 	}
 }
 
