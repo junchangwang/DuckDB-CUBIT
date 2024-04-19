@@ -375,7 +375,7 @@ ParquetWriter::ParquetWriter(FileSystem &fs, ClientContext &context_p, string fi
 		writer->WriteData(const_data_ptr_cast("PAR1"), 4);
 	}
 	TCompactProtocolFactoryT<MyTransport> tproto_factory;
-	protocol = tproto_factory.getProtocol(make_shared<MyTransport>(*writer));
+	protocol = tproto_factory.getProtocol(std::make_shared<MyTransport>(*writer));
 
 	file_meta_data.num_rows = 0;
 	file_meta_data.version = 1;

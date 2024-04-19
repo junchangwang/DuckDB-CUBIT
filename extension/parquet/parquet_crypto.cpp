@@ -2,6 +2,7 @@
 #include "thrift_tools.hpp"
 
 #ifndef DUCKDB_AMALGAMATION
+#include "duckdb/common/helper.hpp"
 #include "duckdb/common/common.hpp"
 #include "duckdb/storage/arena_allocator.hpp"
 #endif
@@ -11,7 +12,7 @@ namespace duckdb {
 ParquetKeys &ParquetKeys::Get(ClientContext &context) {
 	auto &cache = ObjectCache::GetObjectCache(context);
 	if (!cache.Get<ParquetKeys>(ParquetKeys::ObjectType())) {
-		cache.Put(ParquetKeys::ObjectType(), make_shared<ParquetKeys>());
+		cache.Put(ParquetKeys::ObjectType(), make_shared_ptr<ParquetKeys>());
 	}
 	return *cache.Get<ParquetKeys>(ParquetKeys::ObjectType());
 }
@@ -307,13 +308,13 @@ private:
 
 uint32_t ParquetCrypto::Read(TBase &object, TProtocol &iprot, const string &key, const shared_ptr<AESGCMState> &aes_p) {
 	TCompactProtocolFactoryT<DecryptionTransport> tproto_factory;
-	auto dprot = tproto_factory.getProtocol(make_shared<DecryptionTransport>(iprot, key, aes_p));
+	auto dprot = tproto_factory.getProtocol(std::make_shared<DecryptionTransport>(iprot, key, aes_p));
 	auto &dtrans = reinterpret_cast<DecryptionTransport &>(*dprot->getTransport());
 
 	// We have to read the whole thing otherwise thrift throws an error before we realize we're decryption is wrong
 	auto all = dtrans.ReadAll();
 	TCompactProtocolFactoryT<SimpleReadTransport> tsimple_proto_factory;
-	auto simple_prot = tsimple_proto_factory.getProtocol(make_shared<SimpleReadTransport>(all.get(), all.GetSize()));
+	auto simple_prot = tsimple_proto_factory.getProtocol(std::make_shared<SimpleReadTransport>(all.get(), all.GetSize()));
 
 	// Read the object
 	object.read(simple_prot.get());
@@ -325,7 +326,7 @@ uint32_t ParquetCrypto::Write(const TBase &object, TProtocol &oprot, const strin
                               const shared_ptr<AESGCMState> &aes_p) {
 	// Create encryption protocol
 	TCompactProtocolFactoryT<EncryptionTransport> tproto_factory;
-	auto eprot = tproto_factory.getProtocol(make_shared<EncryptionTransport>(oprot, key, aes_p));
+	auto eprot = tproto_factory.getProtocol(std::make_shared<EncryptionTransport>(oprot, key, aes_p));
 	auto &etrans = reinterpret_cast<EncryptionTransport &>(*eprot->getTransport());
 
 	// Write the object in memory
@@ -339,7 +340,7 @@ uint32_t ParquetCrypto::ReadData(TProtocol &iprot, const data_ptr_t buffer, cons
                                  const string &key, const shared_ptr<AESGCMState> &aes_p) {
 	// Create decryption protocol
 	TCompactProtocolFactoryT<DecryptionTransport> tproto_factory;
-	auto dprot = tproto_factory.getProtocol(make_shared<DecryptionTransport>(iprot, key, aes_p));
+	auto dprot = tproto_factory.getProtocol(std::make_shared<DecryptionTransport>(iprot, key, aes_p));
 	auto &dtrans = reinterpret_cast<DecryptionTransport &>(*dprot->getTransport());
 
 	// Read buffer
@@ -354,7 +355,7 @@ uint32_t ParquetCrypto::WriteData(TProtocol &oprot, const const_data_ptr_t buffe
 	// FIXME: we know the size upfront so we could do a streaming write instead of this
 	// Create encryption protocol
 	TCompactProtocolFactoryT<EncryptionTransport> tproto_factory;
-	auto eprot = tproto_factory.getProtocol(make_shared<EncryptionTransport>(oprot, key, aes_p));
+	auto eprot = tproto_factory.getProtocol(std::make_shared<EncryptionTransport>(oprot, key, aes_p));
 	auto &etrans = reinterpret_cast<EncryptionTransport &>(*eprot->getTransport());
 
 	// Write the data in memory
