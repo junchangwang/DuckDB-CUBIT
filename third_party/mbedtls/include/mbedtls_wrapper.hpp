@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "duckdb.h"
 #include "duckdb/common/encryption_state.hpp"
 #include "duckdb/common/optional_ptr.hpp"
 #include "duckdb/common/typedefs.hpp"
@@ -56,7 +57,6 @@ public:
 		DUCKDB_API const std::string GetLib();
 
 	public:
-		static constexpr size_t BLOCK_SIZE = 16;
 		const std::string lib = "mbedtls";
 
 	private:

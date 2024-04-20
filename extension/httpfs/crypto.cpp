@@ -80,7 +80,7 @@ void AESGCMStateSSL::InitializeDecryption(const_data_ptr_t iv, idx_t iv_len, con
 	mode = DECRYPT;
 
 	if (1 != EVP_DecryptInit_ex(context, GetCipher(*key), NULL, const_data_ptr_cast(key->data()), iv)) {
-		throw std::runtime_error("EVP_EncryptInit_ex failed");
+		throw InternalException("EVP_EncryptInit_ex failed");
 	}
 }
 

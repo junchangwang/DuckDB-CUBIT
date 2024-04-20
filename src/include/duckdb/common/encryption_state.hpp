@@ -31,7 +31,6 @@ public:
 	DUCKDB_API virtual void GenerateRandomData(data_ptr_t data, idx_t len);
 
 public:
-	static constexpr size_t BLOCK_SIZE = 16;
 	enum Mode { ENCRYPT, DECRYPT };
 };
 

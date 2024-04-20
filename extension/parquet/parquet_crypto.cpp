@@ -248,12 +248,12 @@ private:
 	void ReadBlock(uint8_t *buf) {
 		// Read from transport into read_buffer at one AES block size offset (up to the tag)
 		read_buffer_size = MinValue(ParquetCrypto::CRYPTO_BLOCK_SIZE, transport_remaining - ParquetCrypto::TAG_BYTES);
-		transport_remaining -= trans.read(read_buffer + EncryptionState::BLOCK_SIZE, read_buffer_size);
+		transport_remaining -= trans.read(read_buffer + ParquetCrypto::BLOCK_SIZE, read_buffer_size);
 
 		// Decrypt from read_buffer + block size into read_buffer start (decryption can trail behind in same buffer)
 #ifdef DEBUG
-		auto size = aes->Process(read_buffer + EncryptionState::BLOCK_SIZE, read_buffer_size, buf,
-		                         ParquetCrypto::CRYPTO_BLOCK_SIZE + EncryptionState::BLOCK_SIZE);
+		auto size = aes->Process(read_buffer + ParquetCrypto::BLOCK_SIZE, read_buffer_size, buf,
+		                         ParquetCrypto::CRYPTO_BLOCK_SIZE + ParquetCrypto::BLOCK_SIZE);
 		D_ASSERT(size == read_buffer_size);
 #else
 		aes->Process(read_buffer + EncryptionState::BLOCK_SIZE, read_buffer_size, buf,
@@ -279,7 +279,7 @@ private:
 	shared_ptr<EncryptionState> aes;
 
 	//! We read/decrypt big blocks at a time
-	data_t read_buffer[ParquetCrypto::CRYPTO_BLOCK_SIZE + EncryptionState::BLOCK_SIZE];
+	data_t read_buffer[ParquetCrypto::CRYPTO_BLOCK_SIZE + ParquetCrypto::BLOCK_SIZE];
 	uint32_t read_buffer_size;
 	uint32_t read_buffer_offset;
 

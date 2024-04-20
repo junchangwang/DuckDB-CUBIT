@@ -63,12 +63,14 @@ private:
 class ParquetCrypto {
 public:
 	//! Encrypted modules
-	static constexpr uint32_t LENGTH_BYTES = 4;
-	static constexpr uint32_t NONCE_BYTES = 12;
-	static constexpr uint32_t TAG_BYTES = 16;
+	static constexpr idx_t LENGTH_BYTES = 4;
+	static constexpr idx_t NONCE_BYTES = 12;
+	static constexpr idx_t TAG_BYTES = 16;
 
 	//! Block size we encrypt/decrypt
-	static constexpr uint32_t CRYPTO_BLOCK_SIZE = 4096;
+	static constexpr idx_t CRYPTO_BLOCK_SIZE = 4096;
+	// AES encrypts blocks of 128 bits
+	static constexpr idx_t BLOCK_SIZE = 16;
 
 public:
 	//! Decrypt and read a Thrift object from the transport protocol

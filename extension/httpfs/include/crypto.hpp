@@ -35,9 +35,6 @@ public:
 	DUCKDB_API size_t Finalize(data_ptr_t out, idx_t out_len, data_ptr_t tag, idx_t tag_len) override;
 	DUCKDB_API void GenerateRandomData(data_ptr_t data, idx_t len) override;
 
-public:
-	static constexpr size_t BLOCK_SIZE = 16;
-
 private:
 	bool ssl = true;
 	EVP_CIPHER_CTX *gcm_context;
