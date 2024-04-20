@@ -256,8 +256,8 @@ private:
 		                         ParquetCrypto::CRYPTO_BLOCK_SIZE + ParquetCrypto::BLOCK_SIZE);
 		D_ASSERT(size == read_buffer_size);
 #else
-		aes->Process(read_buffer + EncryptionState::BLOCK_SIZE, read_buffer_size, buf,
-		             ParquetCrypto::CRYPTO_BLOCK_SIZE + EncryptionState::BLOCK_SIZE);
+		aes->Process(read_buffer + ParquetCrypto::BLOCK_SIZE, read_buffer_size, buf,
+		             ParquetCrypto::CRYPTO_BLOCK_SIZE + ParquetCrypto::BLOCK_SIZE);
 #endif
 		read_buffer_offset = 0;
 	}
