@@ -32,7 +32,7 @@ void hex256(hash_bytes &in, hash_str &out) {
 }
 
 const EVP_CIPHER *GetCipher(const string &key) {
-	// For now, only ciphers for GCM Mode
+	// For now we only support GCM ciphers
 	switch (key.size()) {
 	case 16:
 		return EVP_aes_128_gcm();
@@ -46,15 +46,14 @@ const EVP_CIPHER *GetCipher(const string &key) {
 }
 
 AESGCMStateSSL::AESGCMStateSSL() : gcm_context(EVP_CIPHER_CTX_new()) {
-	auto context = reinterpret_cast<evp_cipher_ctx_st *>(gcm_context);
-	if (!(context)) {
+	if (!(gcm_context)) {
 		throw InternalException("AES GCM failed with initializing context");
 	}
 }
 
 AESGCMStateSSL::~AESGCMStateSSL() {
 	// Clean up
-	EVP_CIPHER_CTX_free(reinterpret_cast<evp_cipher_ctx_st *>(gcm_context));
+	EVP_CIPHER_CTX_free(gcm_context);
 }
 
 bool AESGCMStateSSL::IsOpenSSL() {
@@ -67,36 +66,33 @@ void AESGCMStateSSL::GenerateRandomData(data_ptr_t data, idx_t len) {
 }
 
 void AESGCMStateSSL::InitializeEncryption(const_data_ptr_t iv, idx_t iv_len, const string *key) {
-	auto context = reinterpret_cast<evp_cipher_ctx_st *>(gcm_context);
 	mode = ENCRYPT;
 
-	if (1 != EVP_EncryptInit_ex(context, GetCipher(*key), NULL, const_data_ptr_cast(key->data()), iv)) {
+	if (1 != EVP_EncryptInit_ex(gcm_context, GetCipher(*key), NULL, const_data_ptr_cast(key->data()), iv)) {
 		throw InternalException("AES CTR failed with EncryptInit");
 	}
 }
 
 void AESGCMStateSSL::InitializeDecryption(const_data_ptr_t iv, idx_t iv_len, const string *key) {
-	auto context = reinterpret_cast<evp_cipher_ctx_st *>(gcm_context);
 	mode = DECRYPT;
 
-	if (1 != EVP_DecryptInit_ex(context, GetCipher(*key), NULL, const_data_ptr_cast(key->data()), iv)) {
+	if (1 != EVP_DecryptInit_ex(gcm_context, GetCipher(*key), NULL, const_data_ptr_cast(key->data()), iv)) {
 		throw InternalException("EVP_EncryptInit_ex failed");
 	}
 }
 
 size_t AESGCMStateSSL::Process(const_data_ptr_t in, idx_t in_len, data_ptr_t out, idx_t out_len) {
-	auto context = reinterpret_cast<evp_cipher_ctx_st *>(gcm_context);
 
 	switch (mode) {
 	case ENCRYPT:
-		if (1 != EVP_EncryptUpdate(context, data_ptr_cast(out), reinterpret_cast<int *>(&out_len),
+		if (1 != EVP_EncryptUpdate(gcm_context, data_ptr_cast(out), reinterpret_cast<int *>(&out_len),
 		                           const_data_ptr_cast(in), (int)in_len)) {
 			throw InternalException("AES GCM failed with encrypt update gcm");
 		}
 		break;
 
 	case DECRYPT:
-		if (1 != EVP_DecryptUpdate(context, data_ptr_cast(out), reinterpret_cast<int *>(&out_len),
+		if (1 != EVP_DecryptUpdate(gcm_context, data_ptr_cast(out), reinterpret_cast<int *>(&out_len),
 		                           const_data_ptr_cast(in), (int)in_len)) {
 
 			throw InternalException("AES GCM failed with decrypt update");
@@ -112,28 +108,27 @@ size_t AESGCMStateSSL::Process(const_data_ptr_t in, idx_t in_len, data_ptr_t out
 }
 
 size_t AESGCMStateSSL::Finalize(data_ptr_t out, idx_t out_len, data_ptr_t tag, idx_t tag_len) {
-	auto context = reinterpret_cast<evp_cipher_ctx_st *>(gcm_context);
 	auto text_len = out_len;
 
 	switch (mode) {
 	case ENCRYPT:
-		if (1 != EVP_EncryptFinal_ex(context, data_ptr_cast(out) + out_len, reinterpret_cast<int *>(&out_len))) {
+		if (1 != EVP_EncryptFinal_ex(gcm_context, data_ptr_cast(out) + out_len, reinterpret_cast<int *>(&out_len))) {
 			throw InternalException("AES GCM failed, with finalizing encryption");
 		}
 		text_len += out_len;
 		// The computed tag is written at the end of a chunk
-		if (1 != EVP_CIPHER_CTX_ctrl(context, EVP_CTRL_GCM_GET_TAG, tag_len, tag)) {
+		if (1 != EVP_CIPHER_CTX_ctrl(gcm_context, EVP_CTRL_GCM_GET_TAG, tag_len, tag)) {
 			throw InternalException("AES GCM failed with calculating the tag");
 		}
 		return text_len;
 	case DECRYPT:
 		// Set expected tag value
-		if (!EVP_CIPHER_CTX_ctrl(context, EVP_CTRL_GCM_SET_TAG, tag_len, tag)) {
+		if (!EVP_CIPHER_CTX_ctrl(gcm_context, EVP_CTRL_GCM_SET_TAG, tag_len, tag)) {
 			throw InternalException("AES GCM failed with finalizing tag value");
 		}
 		// EVP_DecryptFinal() will return an error code if padding is enabled
 		// and the final block is not correctly formatted.
-		int ret = EVP_DecryptFinal_ex(context, data_ptr_cast(out) + out_len, reinterpret_cast<int *>(&out_len));
+		int ret = EVP_DecryptFinal_ex(gcm_context, data_ptr_cast(out) + out_len, reinterpret_cast<int *>(&out_len));
 		text_len += out_len;
 
 		if (ret > 0) {
