@@ -69,7 +69,7 @@ void AESGCMStateSSL::InitializeEncryption(const_data_ptr_t iv, idx_t iv_len, con
 	mode = ENCRYPT;
 
 	if (1 != EVP_EncryptInit_ex(gcm_context, GetCipher(*key), NULL, const_data_ptr_cast(key->data()), iv)) {
-		throw InternalException("AES CTR failed with EncryptInit");
+		throw InternalException("EncryptInit failed");
 	}
 }
 
@@ -77,7 +77,7 @@ void AESGCMStateSSL::InitializeDecryption(const_data_ptr_t iv, idx_t iv_len, con
 	mode = DECRYPT;
 
 	if (1 != EVP_DecryptInit_ex(gcm_context, GetCipher(*key), NULL, const_data_ptr_cast(key->data()), iv)) {
-		throw InternalException("EVP_EncryptInit_ex failed");
+		throw InternalException("DecryptInit failed");
 	}
 }
 
@@ -87,7 +87,7 @@ size_t AESGCMStateSSL::Process(const_data_ptr_t in, idx_t in_len, data_ptr_t out
 	case ENCRYPT:
 		if (1 != EVP_EncryptUpdate(gcm_context, data_ptr_cast(out), reinterpret_cast<int *>(&out_len),
 		                           const_data_ptr_cast(in), (int)in_len)) {
-			throw InternalException("AES GCM failed with encrypt update gcm");
+			throw InternalException("EncryptUpdate failed");
 		}
 		break;
 
@@ -95,7 +95,7 @@ size_t AESGCMStateSSL::Process(const_data_ptr_t in, idx_t in_len, data_ptr_t out
 		if (1 != EVP_DecryptUpdate(gcm_context, data_ptr_cast(out), reinterpret_cast<int *>(&out_len),
 		                           const_data_ptr_cast(in), (int)in_len)) {
 
-			throw InternalException("AES GCM failed with decrypt update");
+			throw InternalException("DecryptUpdate failed");
 		}
 		break;
 	}
@@ -113,21 +113,20 @@ size_t AESGCMStateSSL::Finalize(data_ptr_t out, idx_t out_len, data_ptr_t tag, i
 	switch (mode) {
 	case ENCRYPT:
 		if (1 != EVP_EncryptFinal_ex(gcm_context, data_ptr_cast(out) + out_len, reinterpret_cast<int *>(&out_len))) {
-			throw InternalException("AES GCM failed, with finalizing encryption");
+			throw InternalException("EncryptFinal failed");
 		}
 		text_len += out_len;
 		// The computed tag is written at the end of a chunk
 		if (1 != EVP_CIPHER_CTX_ctrl(gcm_context, EVP_CTRL_GCM_GET_TAG, tag_len, tag)) {
-			throw InternalException("AES GCM failed with calculating the tag");
+			throw InternalException("Calculating the tag failed");
 		}
 		return text_len;
 	case DECRYPT:
 		// Set expected tag value
 		if (!EVP_CIPHER_CTX_ctrl(gcm_context, EVP_CTRL_GCM_SET_TAG, tag_len, tag)) {
-			throw InternalException("AES GCM failed with finalizing tag value");
+			throw InternalException("Finalizing tag failed");
 		}
-		// EVP_DecryptFinal() will return an error code if padding is enabled
-		// and the final block is not correctly formatted.
+		// EVP_DecryptFinal() will return an error code if final block is not correctly formatted.
 		int ret = EVP_DecryptFinal_ex(gcm_context, data_ptr_cast(out) + out_len, reinterpret_cast<int *>(&out_len));
 		text_len += out_len;
 
