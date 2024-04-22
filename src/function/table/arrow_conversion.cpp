@@ -5,6 +5,7 @@
 #include "duckdb/common/types/arrow_aux_data.hpp"
 #include "duckdb/function/scalar/nested_functions.hpp"
 #include "duckdb/common/exception/conversion_exception.hpp"
+#include "duckdb/common/types/arrow_string_view_type.hpp"
 
 namespace duckdb {
 
@@ -317,9 +318,6 @@ static void ArrowToDuckDBMapVerify(Vector &vector, idx_t count) {
 	case MapInvalidReason::NULL_KEY: {
 		throw InvalidInputException("Arrow map contains NULL as map key, which isn't supported by DuckDB map type");
 	}
-	case MapInvalidReason::NULL_KEY_LIST: {
-		throw InvalidInputException("Arrow map contains NULL as key list, which isn't supported by DuckDB map type");
-	}
 	default: {
 		throw InternalException("MapInvalidReason not implemented");
 	}
@@ -339,6 +337,35 @@ static void SetVectorString(Vector &vector, idx_t size, char *cdata, T *offsets)
 			throw ConversionException("DuckDB does not support Strings over 4GB");
 		} // LCOV_EXCL_STOP
 		strings[row_idx] = string_t(cptr, UnsafeNumericCast<uint32_t>(str_len));
+	}
+}
+
+static void SetVectorStringView(Vector &vector, idx_t size, ArrowArray &array, idx_t current_pos) {
+	auto strings = FlatVector::GetData<string_t>(vector);
+	auto arrow_string = ArrowBufferData<arrow_string_view_t>(array, 1) + current_pos;
+
+	for (idx_t row_idx = 0; row_idx < size; row_idx++) {
+		if (FlatVector::IsNull(vector, row_idx)) {
+			continue;
+		}
+		auto length = UnsafeNumericCast<uint32_t>(arrow_string[row_idx].Length());
+		if (arrow_string[row_idx].IsInline()) {
+			//	This string is inlined
+			//  | Bytes 0-3  | Bytes 4-15                            |
+			//  |------------|---------------------------------------|
+			//  | length     | data (padded with 0)                  |
+			strings[row_idx] = string_t(arrow_string[row_idx].GetInlineData(), length);
+		} else {
+			//  This string is not inlined, we have to check a different buffer and offsets
+			//  | Bytes 0-3  | Bytes 4-7  | Bytes 8-11 | Bytes 12-15 |
+			//  |------------|------------|------------|-------------|
+			//  | length     | prefix     | buf. index | offset      |
+			auto buffer_index = UnsafeNumericCast<uint32_t>(arrow_string[row_idx].GetBufferIndex());
+			int32_t offset = arrow_string[row_idx].GetOffset();
+			D_ASSERT(array.n_buffers > 2 + buffer_index);
+			auto c_data = ArrowBufferData<char>(array, 2 + buffer_index);
+			strings[row_idx] = string_t(&c_data[offset], length);
+		}
 	}
 }
 
@@ -691,15 +718,28 @@ static void ColumnArrowToDuckDB(Vector &vector, ArrowArray &array, ArrowArraySca
 	}
 	case LogicalTypeId::VARCHAR: {
 		auto size_type = arrow_type.GetSizeType();
-		auto cdata = ArrowBufferData<char>(array, 2);
-		if (size_type == ArrowVariableSizeType::SUPER_SIZE) {
+		switch (size_type) {
+		case ArrowVariableSizeType::SUPER_SIZE: {
+			auto cdata = ArrowBufferData<char>(array, 2);
 			auto offsets = ArrowBufferData<uint64_t>(array, 1) +
 			               GetEffectiveOffset(array, NumericCast<int64_t>(parent_offset), scan_state, nested_offset);
 			SetVectorString(vector, size, cdata, offsets);
-		} else {
+			break;
+		}
+		case ArrowVariableSizeType::NORMAL:
+		case ArrowVariableSizeType::FIXED_SIZE: {
+			auto cdata = ArrowBufferData<char>(array, 2);
 			auto offsets = ArrowBufferData<uint32_t>(array, 1) +
 			               GetEffectiveOffset(array, NumericCast<int64_t>(parent_offset), scan_state, nested_offset);
 			SetVectorString(vector, size, cdata, offsets);
+			break;
+		}
+		case ArrowVariableSizeType::VIEW: {
+			SetVectorStringView(
+			    vector, size, array,
+			    GetEffectiveOffset(array, NumericCast<int64_t>(parent_offset), scan_state, nested_offset));
+			break;
+		}
 		}
 		break;
 	}
