@@ -130,6 +130,7 @@ struct ParquetWriteBindData : public TableFunctionData {
 
 	//! How/Whether to encrypt the data
 	shared_ptr<ParquetEncryptionConfig> encryption_config;
+	bool debug_use_openssl = true;
 
 	//! Dictionary compression is applied only if the compression ratio exceeds this threshold
 	double dictionary_compression_ratio_threshold = 1.0;
@@ -162,6 +163,7 @@ BindInfo ParquetGetBindInfo(const optional_ptr<FunctionData> bind_data) {
 	bind_info.InsertOption("file_path", Value::LIST(LogicalType::VARCHAR, file_path));
 	bind_info.InsertOption("binary_as_string", Value::BOOLEAN(parquet_bind.parquet_options.binary_as_string));
 	bind_info.InsertOption("file_row_number", Value::BOOLEAN(parquet_bind.parquet_options.file_row_number));
+	bind_info.InsertOption("debug_use_openssl", Value::BOOLEAN(parquet_bind.parquet_options.debug_use_openssl));
 	parquet_bind.parquet_options.file_options.AddBatchInfo(bind_info);
 	// LCOV_EXCL_STOP
 	return bind_info;
@@ -309,6 +311,7 @@ public:
 		table_function.table_scan_progress = ParquetProgress;
 		table_function.named_parameters["binary_as_string"] = LogicalType::BOOLEAN;
 		table_function.named_parameters["file_row_number"] = LogicalType::BOOLEAN;
+		table_function.named_parameters["debug_use_openssl"] = LogicalType::BOOLEAN;
 		table_function.named_parameters["compression"] = LogicalType::VARCHAR;
 		table_function.named_parameters["schema"] =
 		    LogicalType::MAP(LogicalType::INTEGER, LogicalType::STRUCT({{{"name", LogicalType::VARCHAR},
@@ -343,6 +346,8 @@ public:
 				parquet_options.binary_as_string = GetBooleanArgument(option);
 			} else if (loption == "file_row_number") {
 				parquet_options.file_row_number = GetBooleanArgument(option);
+			} else if (loption == "debug_use_openssl") {
+				parquet_options.debug_use_openssl = GetBooleanArgument(option);
 			} else if (loption == "encryption_config") {
 				if (option.second.size() != 1) {
 					throw BinderException("Parquet encryption_config cannot be empty!");
@@ -466,6 +471,8 @@ public:
 				parquet_options.binary_as_string = BooleanValue::Get(kv.second);
 			} else if (loption == "file_row_number") {
 				parquet_options.file_row_number = BooleanValue::Get(kv.second);
+			} else if (loption == "debug_use_openssl") {
+				parquet_options.debug_use_openssl = BooleanValue::Get(kv.second);
 			} else if (loption == "schema") {
 				// Argument is a map that defines the schema
 				const auto &schema_value = kv.second;
@@ -1005,6 +1012,15 @@ unique_ptr<FunctionData> ParquetWriteBind(ClientContext &context, CopyFunctionBi
 				                      "dictionary compression");
 			}
 			bind_data->dictionary_compression_ratio_threshold = val;
+		} else if (loption == "debug_use_openssl") {
+			auto val = StringUtil::Lower(option.second[0].GetValue<std::string>());
+			if (val == "false") {
+				bind_data->debug_use_openssl = false;
+			} else if (val == "true") {
+				bind_data->debug_use_openssl = true;
+			} else {
+				throw BinderException("Expected debug_use_openssl to be a BOOLEAN");
+			}
 		} else {
 			throw NotImplementedException("Unrecognized option for PARQUET: %s", option.first.c_str());
 		}
@@ -1030,10 +1046,10 @@ unique_ptr<GlobalFunctionData> ParquetWriteInitializeGlobal(ClientContext &conte
 	auto &parquet_bind = bind_data.Cast<ParquetWriteBindData>();
 
 	auto &fs = FileSystem::GetFileSystem(context);
-	global_state->writer =
-	    make_uniq<ParquetWriter>(fs, file_path, parquet_bind.sql_types, parquet_bind.column_names, parquet_bind.codec,
-	                             parquet_bind.field_ids.Copy(), parquet_bind.kv_metadata,
-	                             parquet_bind.encryption_config, parquet_bind.dictionary_compression_ratio_threshold);
+	global_state->writer = make_uniq<ParquetWriter>(
+	    fs, context, file_path, parquet_bind.sql_types, parquet_bind.column_names, parquet_bind.codec,
+	    parquet_bind.field_ids.Copy(), parquet_bind.kv_metadata, parquet_bind.encryption_config,
+	    parquet_bind.dictionary_compression_ratio_threshold, parquet_bind.debug_use_openssl);
 	return std::move(global_state);
 }
 
@@ -1154,6 +1170,7 @@ static void ParquetCopySerialize(Serializer &serializer, const FunctionData &bin
 	                                                                         bind_data.encryption_config, nullptr);
 	serializer.WriteProperty(108, "dictionary_compression_ratio_threshold",
 	                         bind_data.dictionary_compression_ratio_threshold);
+	serializer.WriteProperty(109, "debug_use_openssl", bind_data.debug_use_openssl);
 }
 
 static unique_ptr<FunctionData> ParquetCopyDeserialize(Deserializer &deserializer, CopyFunction &function) {
@@ -1169,6 +1186,7 @@ static unique_ptr<FunctionData> ParquetCopyDeserialize(Deserializer &deserialize
 	                                                                          data->encryption_config, nullptr);
 	deserializer.ReadPropertyWithDefault<double>(108, "dictionary_compression_ratio_threshold",
 	                                             data->dictionary_compression_ratio_threshold, 1.0);
+	data->debug_use_openssl = deserializer.ReadPropertyWithDefault<bool>(109, "debug_use_openssl", true);
 	return std::move(data);
 }
 // LCOV_EXCL_STOP

@@ -1,8 +1,10 @@
-# name: test/sql/copy/parquet/parquet_encryption_tpch.test_slow
-# description: Test Parquet encryption for TPC-H
+# name: test/sql/copy/parquet/parquet_encrypted_tpch_httpfs.test_slow
+# description: Test Parquet encryption with OpenSSL for TPC-H
 # group: [parquet]
 
 require parquet
+
+require httpfs
 
 require tpch
 

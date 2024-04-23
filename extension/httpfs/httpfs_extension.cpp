@@ -5,6 +5,7 @@
 #include "create_secret_functions.hpp"
 #include "duckdb.hpp"
 #include "s3fs.hpp"
+#include "crypto.hpp"
 
 namespace duckdb {
 
@@ -59,6 +60,9 @@ static void LoadInternal(DatabaseInstance &instance) {
 	provider->SetAll();
 
 	CreateS3SecretFunctions::Register(instance);
+
+	// set pointer to OpenSSL encryption state
+	config.encryption_state = make_shared_ptr<AESGCMStateSSLFactory>();
 }
 
 void HttpfsExtension::Load(DuckDB &db) {

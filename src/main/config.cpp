@@ -383,7 +383,7 @@ idx_t DBConfig::ParseMemoryLimit(const string &arg) {
 		idx++;
 	}
 	if (idx == num_start) {
-		throw ParserException("Memory limit must have a number (e.g. SET memory_limit=1GB");
+		throw ParserException("Memory limit must have a number (e.g. SET memory_limit=1GB)");
 	}
 	string number = arg.substr(num_start, idx - num_start);
 
