@@ -88,7 +88,7 @@ else()
       duckdb_hyperloglog
       duckdb_fastpforlib
       duckdb_mbedtls
-      ${CMAKE_CURRENT_SOURCE_DIR}/include/duckdb/execution/index/cubit/CUBIT-PDS/build/libbitmap.a
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../build/libbitmap.a
       )
 
   add_library(duckdb SHARED ${ALL_OBJECT_FILES})

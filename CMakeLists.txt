@@ -494,8 +494,8 @@ include_directories(third_party/pcg)
 include_directories(third_party/tdigest)
 include_directories(third_party/mbedtls/include)
 include_directories(third_party/jaro_winkler)
-include_directories(src/include/duckdb/execution/index/cubit/CUBIT-PDS/src)
-include_directories(src/include/duckdb/execution/index/cubit/CUBIT-PDS/src/nbub)
+include_directories(../src)
+include_directories(../src/nbub)
 
 add_definitions(-w)
 
