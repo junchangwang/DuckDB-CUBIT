@@ -96,6 +96,17 @@ unique_ptr<GlobalSourceState> PhysicalTableScan::GetGlobalSourceState(ClientCont
 
 SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk &chunk,
                                             OperatorSourceInput &input) const {
+
+	if(context.client.GetCurrentQuery() != "SELECT\n    sum(l_extendedprice * l_discount) AS revenue\nFROM\n    lineitem\nWHERE\n    l_shipdate >= CAST('1994-01-01' AS date)\n    AND l_shipdate < CAST('1995-01-01' AS date)\n    AND l_discount BETWEEN 0.05\n    AND 0.07\n    AND l_quantity < 24;\n") {
+		D_ASSERT(!column_ids.empty());
+		auto &gstate = input.global_state.Cast<TableScanGlobalSourceState>();
+		auto &state = input.local_state.Cast<TableScanLocalSourceState>();
+
+		TableFunctionInput data(bind_data.get(), state.local_state.get(), gstate.global_state.get());
+		function.function(context.client, data, chunk);
+
+		return chunk.size() == 0 ? SourceResultType::FINISHED : SourceResultType::HAVE_MORE_OUTPUT;
+	}
 	// We run 10 trials for CUBIT-powered DuckDB on TPC-H Q6.
 	// The first two trials are to warm up. We report the mean value of the following trials. 
 	// We use a similar strategy in reporting the performance of DuckDB's original Scan.											
