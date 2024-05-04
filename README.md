@@ -18,21 +18,19 @@ The CUBIT-powered DuckDB works as follows.
 
 This repository (DuckDB-CUBIT) aims to help you verify the above-described design and replicate the experiments (TPC-H Q6 with SF=10) in our paper.
 
-When started, DuckDB builds (or loads from disk files) three CUBIT instances (respectively for the attributes l_shipdate, l_discount, and l_quantity). Once a Q6 arrives, DuckDB assigns the query workload to a group of background threads. Each thread explicitly executes the parallel executor's workload for TPC-H Q6. Specifically, it (1) generates the resulting bitvector segments by using the CUBIT instances, (2) transforms the bitvector segments to ID lists, and (3) probes the underlying data (i.e., columns l_extendedprice and l_discount) in one pass.
+When started, DuckDB-CUBIT loads three CUBIT instances (respectively for the attributes l_shipdate, l_discount, and l_quantity) from disk files. (Note that CUBIT instances can also be built on-the-fly. However, that takes hours). Once a Q6 arrives, DuckDB assigns the query workload to a group of background threads. Each thread explicitly executes the parallel executor's workload for TPC-H Q6. Specifically, it (1) generates the resulting bitvector segments by using the CUBIT instances, (2) transforms the bitvector segments to ID lists, and (3) probes the underlying data (i.e., columns l_extendedprice and l_discount) in one pass.
 
-The majority of the code implementing the above function is in PhysicalTableScan::GetData() and IndexRead() in src/execution/operator/scan/physical_table_scan.cpp. Note that there are several code snippets for performance evaluation. In particular, gen_perf_process() is to help you collect hardware characteristics like LLC and TLB misses. 
+The majority of the code implementing the above function is in PhysicalTableScan::GetData() and IndexRead() in src/execution/operator/scan/physical_table_scan.cpp. Note that several code snippets are provided for performance evaluation. In particular, gen_perf_process() helps you collect hardware characteristics like LLC and TLB misses. 
 
 
 How to compile?
 ---------------
 
 - Compile CUBIT by using the command 
-
   ```
   cd ../
   ./build.sh
   ```
-
 - Build the DuckDB-CUBIT project by using the command "make release"
 
 
@@ -40,10 +38,7 @@ How to execute?
 ---------------
 
 - Start DuckDB by using the command "./build/release/duckdb db_file"
-
 - Load TPC-H module by using the command "LOAD tpch;"
-
 - (The first time only) Generate TPC-H workload (SF=10) by using the command "call dbgen(sf=10);"
-
-- Use the CUBIT-powered DuckDB to perform Q6 by simply typing "pragma tpch(6);"
+- Perform a TPC-H Q6 query on CUBIT-powered DuckDB by simply typing "pragma tpch(6);"
 
