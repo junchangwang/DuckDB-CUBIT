@@ -26,8 +26,8 @@
 #include "duckdb/main/table_description.hpp"
 #include "duckdb/transaction/transaction_context.hpp"
 #include "fastbit/bitvector.h"
-#include "nbub/table.h"
-#include "nbub/table_lk.h"
+#include "cubit/table.h"
+#include "cubit/table_lk.h"
 #include "nicolas/base_table.h"
 #include "nicolas/util.h"
 
@@ -51,7 +51,7 @@ struct ParserOptions;
 struct ClientData;
 
 // class BaseTable;
-// class Nbub;
+// class Cubit;
 
 struct PendingQueryParameters {
 	//! Prepared statement parameters (if any)

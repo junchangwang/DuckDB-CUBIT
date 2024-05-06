@@ -80,7 +80,7 @@ Table_config *ClientContext::Make_Config(std::string name) {
 	config->g_cardinality = 7; // [92, 98]
 	enable_fence_pointer = config->enable_fence_pointer = true;
 	INDEX_WORDS = 10000; // Fence length
-	config->approach = "nbub-lk";
+	config->approach = "cubit-lk";
 	config->nThreads_for_getval = 4;
 	config->show_memory = true;
 	config->on_disk = false;
@@ -140,8 +140,8 @@ int ClientContext::Read_BM(Table_config *config, BaseTable **basetable) {
 			return -1;
 		}
 		config->n_rows = n_rows;
-		auto nbubbitmap = new nbub_lk::NbubLK(config);
-		*basetable = nbubbitmap;
+		auto cubitbitmap = new cubit_lk::CubitLK(config);
+		*basetable = cubitbitmap;
 		std::cout << config->INDEX_PATH << " : read bm successfully" << std::endl;
 		return 0;
 	}

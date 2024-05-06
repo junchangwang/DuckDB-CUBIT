@@ -4,7 +4,7 @@ project(example-c++)
 set(CMAKE_CXX_STANDARD 17)
 
 include_directories(../../../src)
-include_directories(../../../src/nbub)
+include_directories(../../../src/cubit)
 include_directories(../../src/include)
 link_directories(../../build/release/src)
 

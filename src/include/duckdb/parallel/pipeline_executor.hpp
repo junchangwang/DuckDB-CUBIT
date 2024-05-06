@@ -16,7 +16,7 @@
 #include "duckdb/parallel/interrupt.hpp"
 #include "duckdb/parallel/pipeline.hpp"
 #include "duckdb/parallel/thread_context.hpp"
-#include "nbub/table.h"
+#include "cubit/table.h"
 
 #include <cstdint>
 #include <functional>

@@ -14,7 +14,7 @@
 #include "duckdb/planner/filter/constant_filter.hpp"
 #include "duckdb/planner/table_filter.hpp"
 #include "fastbit/util.h"
-#include "nbub/table.h"
+#include "cubit/table.h"
 
 #include <cstddef>
 #include <cstdint>

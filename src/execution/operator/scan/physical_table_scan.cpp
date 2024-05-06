@@ -118,9 +118,9 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		auto &gstate = input.global_state.Cast<TableScanGlobalSourceState>();
 		auto &state = input.local_state.Cast<TableScanLocalSourceState>();
 
-		auto nbub_shipdate = dynamic_cast<nbub::Nbub *>(context.client.bitmap_shipdate);
-		auto nbub_discount = dynamic_cast<nbub::Nbub *>(context.client.bitmap_discount);
-		auto nbub_quantity = dynamic_cast<nbub::Nbub *>(context.client.bitmap_quantity);
+		auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
+		auto cubit_discount = dynamic_cast<cubit::Cubit *>(context.client.bitmap_discount);
+		auto cubit_quantity = dynamic_cast<cubit::Cubit *>(context.client.bitmap_quantity);
 
 		int lower_year;
 		int upper_year;
@@ -222,7 +222,7 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 			}
 		}
 
-		uint64_t n_seg = nbub_shipdate->bitmaps[0]->seg_btv->seg_table.size();
+		uint64_t n_seg = cubit_shipdate->bitmaps[0]->seg_btv->seg_table.size();
 		uint64_t n_threads = 1;
 		uint64_t n_seg_per_thread = n_seg / n_threads;
 		uint64_t n_left = n_seg % n_threads;
@@ -246,8 +246,8 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
 		auto logical_types = GetTypes();
 		for (uint64_t i = 0; i < n_threads; i++) {
-			threads[i] = std::thread(&IndexRead, &thread_row_ids[i], begin[i], begin[i + 1], nbub_shipdate,
-			                         nbub_discount, nbub_quantity, lower_year, upper_year, lower_discount,
+			threads[i] = std::thread(&IndexRead, &thread_row_ids[i], begin[i], begin[i + 1], cubit_shipdate,
+			                         cubit_discount, cubit_quantity, lower_year, upper_year, lower_discount,
 			                         upper_discount, upper_quantity, &transaction, &context.client, &local_revenues[i],
 			                         bind_data.get(), table_filters.get(), &chunk, &logical_types);
 		}
@@ -333,8 +333,8 @@ static int kill_perf_process(int perf_pid) {
 //     AND 0.07
 //     AND l_quantity < 24;
 
-void PhysicalTableScan::IndexRead(vector<row_t> *row_ids, uint64_t begin, uint64_t end, nbub::Nbub *bitmap_shipdate,
-                                  nbub::Nbub *bitmap_discount, nbub::Nbub *bitmap_quantity, int lower_year,
+void PhysicalTableScan::IndexRead(vector<row_t> *row_ids, uint64_t begin, uint64_t end, cubit::Cubit *bitmap_shipdate,
+                                  cubit::Cubit *bitmap_discount, cubit::Cubit *bitmap_quantity, int lower_year,
                                   int upper_year, int lower_discount, int upper_discount, int upper_qantity,
                                   DuckTransaction *transaction, ClientContext *context, double *local_revenue,
                                   FunctionData *bind_data, TableFilterSet *table_filters, DataChunk *chunk,
