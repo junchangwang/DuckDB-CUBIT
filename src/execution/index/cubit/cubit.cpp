@@ -64,7 +64,7 @@ CUBIT::CUBIT(const vector<column_t> &column_ids, TableIOManager &table_io_manage
 	config->g_cardinality = 20; // [92, 98]
 	enable_fence_pointer = config->enable_fence_pointer = true;
 	INDEX_WORDS = 10000;  // Fence length 
-	config->approach = "nbub-lk";
+	config->approach = "cubit-lk";
 	config->nThreads_for_getval = 4;
 	config->show_memory = true;
 	config->on_disk = false;
@@ -87,7 +87,7 @@ CUBIT::CUBIT(const vector<column_t> &column_ids, TableIOManager &table_io_manage
 	config->enable_parallel_cnt = false;
 
 
-	this->bitmap = new nbub_lk::NbubLK(config);
+	this->bitmap = new cubit_lk::CubitLK(config);
 	db_timestamp = Timestamp::GetEpochMs(Timestamp::GetCurrentTimestamp());
 	db_number_of_rows = 15000;
 }
@@ -189,7 +189,7 @@ PreservedError CUBIT::Insert(IndexLock &lock, DataChunk &data, Vector &row_ident
 	UnifiedVectorFormat idata;
 	input.ToUnifiedFormat(data.size(), idata);
 
-	auto *cubit_bitmap = dynamic_cast<nbub::Nbub *>(bitmap);
+	auto *cubit_bitmap = dynamic_cast<cubit::Cubit *>(bitmap);
 	switch (input.GetType().InternalType()) {
 	case PhysicalType::INT8: {
 		auto input_data_i8 = UnifiedVectorFormat::GetData<int8_t>(idata);
@@ -244,8 +244,8 @@ PreservedError CUBIT::Insert(IndexLock &lock, DataChunk &data, Vector &row_ident
 bool CUBIT::MergeIndexes(IndexLock &state, Index &other_index) {
 	auto &other_cubit = other_index.Cast<CUBIT>();
 
-	auto this_nbub = dynamic_cast<nbub::Nbub *>(bitmap);
-	auto other_nbub = dynamic_cast<nbub::Nbub *>(other_cubit.bitmap);
+	auto this_nbub = dynamic_cast<cubit::Cubit *>(bitmap);
+	auto other_nbub = dynamic_cast<cubit::Cubit *>(other_cubit.bitmap);
 
 	D_ASSERT(this_nbub->num_bitmaps == other_nbub->num_bitmaps);
 
@@ -281,7 +281,7 @@ bool CUBIT::SearchEqual(CUBITIndexScanState &state, idx_t max_count, vector<row_
     throw InternalException("Invalid attribute type for our cubit index");
     }
 
-	auto *cubit_bitmap = dynamic_cast<nbub::Nbub *>(bitmap);
+	auto *cubit_bitmap = dynamic_cast<cubit::Cubit *>(bitmap);
 	ibis::bitvector *bit_vector = cubit_bitmap->bitmaps[v]->btv;
 
 	// TODO: use BMI instructions to accelerate reading (chienguo)
@@ -331,7 +331,7 @@ bool CUBIT::SearchGreater(CUBITIndexScanState &state, bool equal, idx_t max_coun
     throw InternalException("Invalid attribute type for our cubit index");
     }
 
-	auto *cubit_bitmap = dynamic_cast<nbub::Nbub *>(bitmap);
+	auto *cubit_bitmap = dynamic_cast<cubit::Cubit *>(bitmap);
     vector<ibis::bitvector *> btvs;
 	if (equal) {
         btvs.push_back(cubit_bitmap->bitmaps[v]->btv);
@@ -395,7 +395,7 @@ bool CUBIT::SearchLess(CUBITIndexScanState &state, bool equal, idx_t max_count, 
     throw InternalException("Invalid attribute type for our cubit index");
     }
 
-	auto *cubit_bitmap = dynamic_cast<nbub::Nbub *>(bitmap);
+	auto *cubit_bitmap = dynamic_cast<cubit::Cubit *>(bitmap);
     vector<ibis::bitvector *> btvs;
 	if (equal) {
         btvs.push_back(cubit_bitmap->bitmaps[v]->btv);
@@ -481,7 +481,7 @@ bool CUBIT::SearchCloseRange(CUBITIndexScanState &state, bool left_equal, bool r
 	}
 
     vector<ibis::bitvector *> btvs;
-	auto *cubit_bitmap = dynamic_cast<nbub::Nbub *>(bitmap);
+	auto *cubit_bitmap = dynamic_cast<cubit::Cubit *>(bitmap);
 	if (left_equal) {
 		btvs.push_back(cubit_bitmap->bitmaps[left_v]->btv);
 	}
