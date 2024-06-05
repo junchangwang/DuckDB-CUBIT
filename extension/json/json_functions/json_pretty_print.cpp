@@ -8,7 +8,7 @@ string_t PrettyPrint(yyjson_val *val, yyjson_alc *alc, Vector &result) {
 	idx_t len;
 	auto data =
 	    yyjson_val_write_opts(val, JSONCommon::WRITE_PRETTY_FLAG, alc, reinterpret_cast<size_t *>(&len), nullptr);
-	return string_t(data, len);
+	return StringVector::AddString(result, data, len);
 }
 
 static void PrettyPrintFunction(DataChunk &args, ExpressionState &state, Vector &result) {
