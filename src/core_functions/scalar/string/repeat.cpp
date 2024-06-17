@@ -34,7 +34,8 @@ static void RepeatFunction(DataChunk &args, ExpressionState &, Vector &result) {
 ScalarFunctionSet RepeatFun::GetFunctions() {
 	ScalarFunctionSet repeat;
 	for (const auto &type : {LogicalType::VARCHAR, LogicalType::BLOB}) {
-		repeat.AddFunction(ScalarFunction({type, LogicalType::BIGINT}, type, RepeatFunction));
+		repeat.AddFunction(
+		    ScalarFunction({type, LogicalType::BIGINT}, type, RepeatFunction, FunctionRetCollationBinder));
 	}
 	return repeat;
 }
