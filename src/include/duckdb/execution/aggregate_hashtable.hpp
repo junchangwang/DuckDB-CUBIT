@@ -68,6 +68,9 @@ public:
 	//! Fetch the aggregates for specific groups from the HT and place them in the result
 	void FetchAggregates(DataChunk &groups, DataChunk &result);
 
+	//! Fetch entries from the hash table into the result chunk
+	void FetchAll(DataChunk &keys, DataChunk &payload);
+
 	//! Finds or creates groups in the hashtable using the specified group keys. The addresses vector will be filled
 	//! with pointers to the groups in the hash table, and the new_groups selection vector will point to the newly
 	//! created groups. The return value is the amount of newly created groups.
@@ -96,6 +99,8 @@ public:
 
 	//! Unpins the data blocks
 	void UnpinData();
+	//! Reset aggregate ht
+	void Reset();
 
 private:
 	//! Efficiently matches groups

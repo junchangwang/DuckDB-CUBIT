@@ -65,6 +65,7 @@ private:
 	//! Probe Hash Table and eliminate duplicate rows
 	idx_t ProbeHT(DataChunk &chunk, RecursiveCTEState &state) const;
 
+protected:
 	void ExecuteRecursivePipelines(ExecutionContext &context) const;
 };
 
