@@ -28,6 +28,10 @@
 #include "duckdb/main/client_properties.hpp"
 #include "duckdb/main/client_context_state.hpp"
 #include "duckdb/main/settings.hpp"
+#include "fastbit/bitvector.h"
+#include "nicolas/base_table.h"
+#include "nicolas/util.h"
+#include "table_lk.h"
 
 namespace duckdb {
 class Appender;
@@ -84,6 +88,12 @@ public:
 	//! Data for the currently running transaction
 	TransactionContext transaction;
 
+	static int first;
+	static int sf;
+	BaseTable *bitmap_shipdate;
+	BaseTable *bitmap_discount;
+	BaseTable *bitmap_quantity;
+
 public:
 	MetaTransaction &ActiveTransaction() {
 		return transaction.ActiveTransaction();
@@ -95,6 +105,9 @@ public:
 	DUCKDB_API void EnableProfiling();
 	//! Disable query profiling
 	DUCKDB_API void DisableProfiling();
+
+	Table_config *Make_Config(string name);
+	int Read_BM(Table_config *config, BaseTable **basebitmap);
 
 	//! Issue a query, returning a QueryResult. The QueryResult can be either a StreamQueryResult or a
 	//! MaterializedQueryResult. The StreamQueryResult will only be returned in the case of a successful SELECT

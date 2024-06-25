@@ -6,6 +6,18 @@ endif()
 
 add_extension_definitions()
 
+find_library(URCU_LIBRARIES 
+		NAMES urcu
+		HINTS "/usr/lib/x86_64-linux-gnu")
+
+Set(BOOST_LIBRARYDIR /usr/lib/x86_64-linux-gnu)
+set(BOOST_INCLUDEDIR /usr/include)
+set(Boost_NO_SYSTEM_PATHS on)  
+#set(URCU_LIBRARIES /usr/lib/x86_64-linux-gnu/liburcu.so)
+find_package(Boost COMPONENTS filesystem program_options system REQUIRED)
+INCLUDE_DIRECTORIES(${Boost_INCLUDE_DIRS})
+#MESSAGE( FATAL_ERROR "${Boost_LIBRARIES}     dic: ${Boost_LIBRARY_DIRS}  ${Boost_INCLUDE_DIRS} ${URCU_LIBRARIES}")
+
 if(NOT MSVC)
   set(CMAKE_CXX_FLAGS_DEBUG
       "${CMAKE_CXX_FLAGS_DEBUG} -Wextra -Wno-unused-parameter -Wno-redundant-move"
@@ -92,15 +104,18 @@ else()
       duckdb_fastpforlib
       duckdb_skiplistlib
       duckdb_mbedtls
-      duckdb_yyjson)
+      duckdb_yyjson
+      ${CMAKE_CURRENT_SOURCE_DIR}/../../build/libbitmap.a)
 
   add_library(duckdb SHARED ${ALL_OBJECT_FILES})
   target_link_libraries(duckdb ${DUCKDB_LINK_LIBS})
+  target_link_libraries(duckdb pthread atomic  ${Boost_LIBRARIES} ${URCU_LIBRARIES})
   link_threads(duckdb)
   link_extension_libraries(duckdb)
 
   add_library(duckdb_static STATIC ${ALL_OBJECT_FILES})
   target_link_libraries(duckdb_static ${DUCKDB_LINK_LIBS})
+  target_link_libraries(duckdb_static pthread atomic  ${Boost_LIBRARIES} ${URCU_LIBRARIES})
   link_threads(duckdb_static)
   link_extension_libraries(duckdb_static)
 

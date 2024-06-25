@@ -28,6 +28,9 @@
 #include "duckdb/common/thread.hpp"
 #endif
 
+uint64_t db_timestamp __attribute__((aligned(128)));
+uint64_t db_number_of_rows;
+
 namespace duckdb {
 
 DBConfig::DBConfig() {

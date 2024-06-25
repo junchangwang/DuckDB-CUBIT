@@ -44,6 +44,10 @@
 #include "duckdb/storage/data_table.hpp"
 #include "duckdb/common/exception/transaction_exception.hpp"
 #include "duckdb/main/client_context_state.hpp"
+#include<iostream>
+#include<fstream>
+#include "table.h"
+#include "table_lk.h"
 
 namespace duckdb {
 
@@ -135,11 +139,116 @@ struct DebugClientContextState : public ClientContextState {
 };
 #endif
 
+int ClientContext::first = 0;
+
+int ClientContext::sf = 10;
+
+Table_config *ClientContext::Make_Config(std::string name) {
+	Table_config *config = new Table_config {};
+	config->n_workers = 1;
+	config->DATA_PATH = "";
+	std::string path = "bm_";
+	path.append(to_string((int)(1500000 * sf)));
+	path.append("_");
+	path.append(name);
+	config->INDEX_PATH = path;
+	// config->n_rows = n_rows;
+	config->g_cardinality = 7; // [92, 98]
+	enable_fence_pointer = config->enable_fence_pointer = true;
+	INDEX_WORDS = 10000; // Fence length
+	config->approach = "cubit-lk";
+	config->nThreads_for_getval = 4;
+	config->show_memory = true;
+	config->on_disk = false;
+	config->showEB = false;
+	config->decode = false;
+
+	// DBx1000 doesn't use the following parameters;
+	// they are used by nicolas.
+	config->n_queries = 0;
+	config->n_udis = 0;
+	config->verbose = false;
+	config->time_out = 100;
+	config->autoCommit = false;
+	config->n_merge_threshold = 16;
+	config->db_control = false;
+
+	config->segmented_btv = true;
+	config->encoded_word_len = 31;
+	// TODO: seg number?
+	config->rows_per_seg = 1000000;
+	config->enable_parallel_cnt = false;
+
+	if (name == "shipdate") {
+		config->g_cardinality = 7;
+		return config;
+	}
+
+	if (name == "discount") {
+		config->g_cardinality = 11;
+		return config;
+	}
+	if (name == "quantity") {
+		config->g_cardinality = 51;
+		return config;
+	}
+	return config;
+}
+
+int ClientContext::Read_BM(Table_config *config, BaseTable **basetable) {
+
+	if (!config->INDEX_PATH.empty()) {
+		// Check whether the index has been built before.
+		std::fstream done;
+		uint64_t n_rows = 0;
+		std::string path = "bm_";
+		path.append(to_string((int)(1500000 * sf)));
+		path.append("_");
+		std::string prepath = path;
+		path.append("done");
+		std::cout << path << std::endl;
+		done.open(path, std::ios::in);
+		if (done.is_open()) {
+			done >> n_rows;
+			done.close();
+		} else {
+			std::cout << ".bm is not ready" << std::endl;
+			return -1;
+		}
+		config->n_rows = n_rows;
+		auto cubitbitmap = new cubit_lk::CubitLK(config);
+		*basetable = cubitbitmap;
+		std::cout << config->INDEX_PATH << " : read bm successfully" << std::endl;
+		return 0;
+	}
+	std::cout << "no index path" << std::endl;
+	return -1;
+}
+
+
 ClientContext::ClientContext(shared_ptr<DatabaseInstance> database)
     : db(std::move(database)), interrupted(false), client_data(make_uniq<ClientData>(*this)), transaction(*this) {
 #ifdef DEBUG
 	registered_state["debug_client_context_state"] = make_uniq<DebugClientContextState>();
 #endif
+
+	// three bitmaps read from bm
+	// if(first == 1) {
+	// test for shipdate
+	std::string s = "shipdate";
+	Table_config *config_shipdate = Make_Config(s);
+	int state = Read_BM(config_shipdate, &bitmap_shipdate);
+
+	s = "discount";
+	Table_config *config_discount = Make_Config(s);
+	state = Read_BM(config_discount, &bitmap_discount);
+
+	s = "quantity";
+	Table_config *config_quantity = Make_Config(s);
+	state = Read_BM(config_quantity, &bitmap_quantity);
+	// }
+	first++;
+
 }
 
 ClientContext::~ClientContext() {

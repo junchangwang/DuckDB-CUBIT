@@ -69,6 +69,9 @@ public:
 	//! Fetch a value of the specific row id and append it to the result
 	void FetchRow(ColumnFetchState &state, row_t row_id, Vector &result, idx_t result_idx);
 
+	//! Fetch values of these specific row ids and append it to the result
+	void FetchRowsInSeg(ColumnFetchState &state, vector<row_t> &row_ids, Vector &result, idx_t result_offset);
+
 	static idx_t FilterSelection(SelectionVector &sel, Vector &vector, UnifiedVectorFormat &vdata,
 	                             const TableFilter &filter, idx_t scan_count, idx_t &approved_tuple_count);
 

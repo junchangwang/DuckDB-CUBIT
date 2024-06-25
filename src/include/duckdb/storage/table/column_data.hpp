@@ -185,9 +185,11 @@ protected:
 
 	idx_t GetVectorCount(idx_t vector_index) const;
 
-protected:
+public:
 	//! The segments holding the data of this column segment
 	ColumnSegmentTree data;
+
+protected:
 	//! The lock for the updates
 	mutable mutex update_lock;
 	//! The updates for this column segment
