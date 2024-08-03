@@ -93,6 +93,7 @@ public:
 	BaseTable *bitmap_shipdate;
 	BaseTable *bitmap_discount;
 	BaseTable *bitmap_quantity;
+	BaseTable *bitmap_orderkey;
 
 public:
 	MetaTransaction &ActiveTransaction() {

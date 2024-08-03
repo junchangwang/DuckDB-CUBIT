@@ -45,6 +45,10 @@ public:
 	//! Currently stores any filters applied to file names (as strings)
 	ExtraOperatorInfo extra_info;
 
+	vector<row_t> *row_ids;
+
+	idx_t *cursor;
+
 public:
 	string GetName() const override;
 	string ParamsToString() const override;
@@ -77,6 +81,11 @@ public:
 	                      int lower_discount, int upper_discount, int upper_quantity, DuckTransaction *txn,
 	                      ClientContext *context, double *local_revenue, FunctionData *bind_data,
 	                      TableFilterSet *table_filters, DataChunk *chunk, vector<LogicalType> *types);
+	static void IndexRead_nofetch(vector<row_t> *row_ids, uint64_t begin, uint64_t end, cubit::Cubit *bitmap_shipdate,
+	                      cubit::Cubit *bitmap_discount, cubit::Cubit *bitmap_quantity, int lower_year, int upper_year,
+	                      int lower_discount, int upper_discount, int upper_quantity);
+	void TPCH_Q6_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
+	void TPCH_Q5(ExecutionContext &context) const;
 };
 
 } // namespace duckdb

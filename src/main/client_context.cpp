@@ -192,6 +192,13 @@ Table_config *ClientContext::Make_Config(std::string name) {
 		config->g_cardinality = 51;
 		return config;
 	}
+
+	if (name == "orderkey") {
+		config->g_cardinality = 6000000 * sf + 1;
+		config->segmented_btv = false;
+		return config;
+	}
+
 	return config;
 }
 
@@ -215,9 +222,23 @@ int ClientContext::Read_BM(Table_config *config, BaseTable **basetable) {
 			std::cout << ".bm is not ready" << std::endl;
 			return -1;
 		}
+
+		if(config->INDEX_PATH == "bm_15000000_orderkey")
+			n_rows = 59986052;
+
 		config->n_rows = n_rows;
 		auto cubitbitmap = new cubit_lk::CubitLK(config);
 		*basetable = cubitbitmap;
+		if(config->segmented_btv) {
+			uint64_t n_seg = cubitbitmap->bitmaps[0]->seg_btv->seg_table.size();
+			for(int i = 0; i < cubitbitmap->config->g_cardinality; i++) {
+				for(int j = 0; j < n_seg; j++) {
+					auto &seg = cubitbitmap->bitmaps[i]->seg_btv->seg_table.find(j)->second;
+					seg.btv->decompress();
+				}
+			}
+		}
+
 		std::cout << config->INDEX_PATH << " : read bm successfully" << std::endl;
 		return 0;
 	}
@@ -232,9 +253,9 @@ ClientContext::ClientContext(shared_ptr<DatabaseInstance> database)
 	registered_state["debug_client_context_state"] = make_uniq<DebugClientContextState>();
 #endif
 
-	// three bitmaps read from bm
-	// if(first == 1) {
+	if(first == 0) {
 	// test for shipdate
+
 	std::string s = "shipdate";
 	Table_config *config_shipdate = Make_Config(s);
 	int state = Read_BM(config_shipdate, &bitmap_shipdate);
@@ -246,7 +267,11 @@ ClientContext::ClientContext(shared_ptr<DatabaseInstance> database)
 	s = "quantity";
 	Table_config *config_quantity = Make_Config(s);
 	state = Read_BM(config_quantity, &bitmap_quantity);
-	// }
+
+	s = "orderkey";
+	Table_config *config_orderkey = Make_Config(s);
+	state = Read_BM(config_orderkey, &bitmap_orderkey);
+	}
 	first++;
 
 }
