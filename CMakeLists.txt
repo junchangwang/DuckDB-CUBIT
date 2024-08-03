@@ -591,6 +591,8 @@ include_directories(third_party/yyjson/include)
 include_directories(../src)
 include_directories(../src/cubit)
 
+add_compile_options(-mavx512f -march=native)
+
 # todo only regenerate ub file if one of the input files changed hack alert
 function(enable_unity_build UB_SUFFIX SOURCE_VARIABLE_NAME)
   set(files ${${SOURCE_VARIABLE_NAME}})
