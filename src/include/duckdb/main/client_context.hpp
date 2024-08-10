@@ -94,6 +94,9 @@ public:
 	BaseTable *bitmap_discount;
 	BaseTable *bitmap_quantity;
 	BaseTable *bitmap_orderkey;
+	BaseTable *bitmap_linestatus;
+	BaseTable *bitmap_returnflag;
+	BaseTable *bitmap_shipdate_q1;
 
 public:
 	MetaTransaction &ActiveTransaction() {
@@ -107,8 +110,8 @@ public:
 	//! Disable query profiling
 	DUCKDB_API void DisableProfiling();
 
-	Table_config *Make_Config(string name);
-	int Read_BM(Table_config *config, BaseTable **basebitmap);
+	Table_config *Make_Config(string name, int cardinality = 0, bool is_segment = true);
+	int Read_BM(Table_config *config, BaseTable **basebitmap, uint64_t fixed_rows = 0, bool decompress = false);
 
 	//! Issue a query, returning a QueryResult. The QueryResult can be either a StreamQueryResult or a
 	//! MaterializedQueryResult. The StreamQueryResult will only be returned in the case of a successful SELECT

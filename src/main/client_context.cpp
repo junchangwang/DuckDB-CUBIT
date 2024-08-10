@@ -139,11 +139,18 @@ struct DebugClientContextState : public ClientContextState {
 };
 #endif
 
+unsigned char tab[16]={0x00,0x08,0x04,0x0c,0x02,0x0a,0x06,0x0e,0x01,0x09,0x05,0x0d,0x03,0x0b,0x07,0x0f}; 
+
+unsigned char bin8_rev(unsigned char bb)  
+{ 
+return ((tab[bb>>4])|(tab[bb&0x0f]<<4)); 
+} 
+
 int ClientContext::first = 0;
 
 int ClientContext::sf = 10;
 
-Table_config *ClientContext::Make_Config(std::string name) {
+Table_config *ClientContext::Make_Config(std::string name, int cardinality, bool is_segment) {
 	Table_config *config = new Table_config {};
 	config->n_workers = 1;
 	config->DATA_PATH = "";
@@ -153,7 +160,7 @@ Table_config *ClientContext::Make_Config(std::string name) {
 	path.append(name);
 	config->INDEX_PATH = path;
 	// config->n_rows = n_rows;
-	config->g_cardinality = 7; // [92, 98]
+	config->g_cardinality = cardinality;
 	enable_fence_pointer = config->enable_fence_pointer = true;
 	INDEX_WORDS = 10000; // Fence length
 	config->approach = "cubit-lk";
@@ -173,36 +180,16 @@ Table_config *ClientContext::Make_Config(std::string name) {
 	config->n_merge_threshold = 16;
 	config->db_control = false;
 
-	config->segmented_btv = true;
+	config->segmented_btv = is_segment;
 	config->encoded_word_len = 31;
 	// TODO: seg number?
 	config->rows_per_seg = 1000000;
 	config->enable_parallel_cnt = false;
 
-	if (name == "shipdate") {
-		config->g_cardinality = 7;
-		return config;
-	}
-
-	if (name == "discount") {
-		config->g_cardinality = 11;
-		return config;
-	}
-	if (name == "quantity") {
-		config->g_cardinality = 51;
-		return config;
-	}
-
-	if (name == "orderkey") {
-		config->g_cardinality = 6000000 * sf + 1;
-		config->segmented_btv = false;
-		return config;
-	}
-
 	return config;
 }
 
-int ClientContext::Read_BM(Table_config *config, BaseTable **basetable) {
+int ClientContext::Read_BM(Table_config *config, BaseTable **basetable, uint64_t fixed_rows, bool decompress) {
 
 	if (!config->INDEX_PATH.empty()) {
 		// Check whether the index has been built before.
@@ -223,8 +210,8 @@ int ClientContext::Read_BM(Table_config *config, BaseTable **basetable) {
 			return -1;
 		}
 
-		if(config->INDEX_PATH == "bm_15000000_orderkey")
-			n_rows = 59986052;
+		if(fixed_rows)
+			n_rows = fixed_rows;
 
 		config->n_rows = n_rows;
 		auto cubitbitmap = new cubit_lk::CubitLK(config);
@@ -236,6 +223,11 @@ int ClientContext::Read_BM(Table_config *config, BaseTable **basetable) {
 					auto &seg = cubitbitmap->bitmaps[i]->seg_btv->seg_table.find(j)->second;
 					seg.btv->decompress();
 				}
+			}
+		}
+		if(decompress) {
+			for(int i = 0; i < cubitbitmap->config->g_cardinality; i++) {
+				cubitbitmap->bitmaps[i]->btv->decompress();
 			}
 		}
 
@@ -253,24 +245,38 @@ ClientContext::ClientContext(shared_ptr<DatabaseInstance> database)
 	registered_state["debug_client_context_state"] = make_uniq<DebugClientContextState>();
 #endif
 
-	if(first == 0) {
+	if(first == 1) {
 	// test for shipdate
 
 	std::string s = "shipdate";
-	Table_config *config_shipdate = Make_Config(s);
+	Table_config *config_shipdate = Make_Config(s, 7);
 	int state = Read_BM(config_shipdate, &bitmap_shipdate);
 
 	s = "discount";
-	Table_config *config_discount = Make_Config(s);
+	Table_config *config_discount = Make_Config(s, 11);
 	state = Read_BM(config_discount, &bitmap_discount);
 
 	s = "quantity";
-	Table_config *config_quantity = Make_Config(s);
+	Table_config *config_quantity = Make_Config(s, 51);
 	state = Read_BM(config_quantity, &bitmap_quantity);
 
 	s = "orderkey";
-	Table_config *config_orderkey = Make_Config(s);
+	Table_config *config_orderkey = Make_Config(s, 6000000 * sf + 1, false);
 	state = Read_BM(config_orderkey, &bitmap_orderkey);
+
+	// 'O'->0  'F'->1
+	s = "linestatus";
+	Table_config *config_linestatus = Make_Config(s, 2, false);
+	state = Read_BM(config_linestatus, &bitmap_linestatus, 59986052, true);
+
+	// 'N'->0  'R'->1 'A'->2
+	s = "returnflag";
+	Table_config *config_returnflag = Make_Config(s, 3, false);
+	state = Read_BM(config_returnflag, &bitmap_returnflag, 59986052, true);
+	
+	s = "shipdate_q1";
+	Table_config *config_shipdate_q1= Make_Config(s, 10562, false);
+	state = Read_BM(config_shipdate_q1, &bitmap_shipdate_q1, 59986052, false);
 	}
 	first++;
 

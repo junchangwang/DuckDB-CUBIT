@@ -85,6 +85,7 @@ public:
 	                      cubit::Cubit *bitmap_discount, cubit::Cubit *bitmap_quantity, int lower_year, int upper_year,
 	                      int lower_discount, int upper_discount, int upper_quantity);
 	void TPCH_Q6_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
+	void TPCH_Q1(ExecutionContext &context) const;
 	void TPCH_Q5(ExecutionContext &context) const;
 };
 
