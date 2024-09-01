@@ -96,7 +96,14 @@ public:
 	BaseTable *bitmap_orderkey;
 	BaseTable *bitmap_linestatus;
 	BaseTable *bitmap_returnflag;
-	BaseTable *bitmap_shipdate_q1;
+	BaseTable *bitmap_suppkey;
+	BaseTable *bitmap_partkey;
+	BaseTable *bitmap_shipmode;
+	BaseTable *bitmap_shipinstruct;
+	BaseTable *bitmap_o_orderkey;
+	BaseTable *bitmap_receiptdate;
+	vector<int64_t> q12_orderkey;
+	vector<int64_t> q18_orderkey;
 
 public:
 	MetaTransaction &ActiveTransaction() {

@@ -106,6 +106,8 @@ struct DictionaryCompressionStorage {
 	static void StringScan(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result);
 	static void StringFetchRow(ColumnSegment &segment, ColumnFetchState &state, row_t row_id, Vector &result,
 	                           idx_t result_idx);
+	static void StringFetchRowInSeg(ColumnSegment &segment, ColumnFetchState &state, vector<row_t> &row_ids, Vector &result,
+                              idx_t result_offset);
 
 	static bool HasEnoughSpace(idx_t current_count, idx_t index_count, idx_t dict_size,
 	                           bitpacking_width_t packing_width);
@@ -576,6 +578,43 @@ void DictionaryCompressionStorage::StringFetchRow(ColumnSegment &segment, Column
 	result_data[result_idx] = FetchStringFromDict(segment, dict, baseptr, NumericCast<int32_t>(dict_offset), str_len);
 }
 
+void DictionaryCompressionStorage::StringFetchRowInSeg(ColumnSegment &segment, ColumnFetchState &state, vector<row_t> &row_ids, Vector &result,
+                              idx_t result_offset) {
+	// fetch a single row from the string segment
+	// first pin the main buffer if it is not already pinned
+	auto &handle = state.GetOrInsertHandle(segment);
+
+	auto baseptr = handle.Ptr() + segment.GetBlockOffset();
+	auto header_ptr = reinterpret_cast<dictionary_compression_header_t *>(baseptr);
+	auto dict = DictionaryCompressionStorage::GetDictionary(segment, handle);
+	auto index_buffer_offset = Load<uint32_t>(data_ptr_cast(&header_ptr->index_buffer_offset));
+	auto width = (bitpacking_width_t)Load<uint32_t>(data_ptr_cast(&header_ptr->bitpacking_width));
+	auto index_buffer_ptr = reinterpret_cast<uint32_t *>(baseptr + index_buffer_offset);
+	auto base_data = data_ptr_cast(baseptr + DICTIONARY_HEADER_SIZE);
+	auto result_data = FlatVector::GetData<string_t>(result);
+
+	// Decompress part of selection buffer we need for this value.
+	sel_t decompression_buffer[BitpackingPrimitives::BITPACKING_ALGORITHM_GROUP_SIZE];
+
+	for (auto row_id : row_ids) {
+
+		row_id -= segment.start;
+		// Handling non-bitpacking-group-aligned start values;
+		idx_t start_offset = NumericCast<idx_t>(row_id) % BitpackingPrimitives::BITPACKING_ALGORITHM_GROUP_SIZE;
+
+		data_ptr_t src = data_ptr_cast(&base_data[((NumericCast<idx_t>(row_id) - start_offset) * width) / 8]);
+		BitpackingPrimitives::UnPackBuffer<sel_t>(data_ptr_cast(decompression_buffer), src,
+												BitpackingPrimitives::BITPACKING_ALGORITHM_GROUP_SIZE, width);
+
+		auto selection_value = decompression_buffer[start_offset];
+		auto dict_offset = index_buffer_ptr[selection_value];
+		uint16_t str_len = GetStringLength(index_buffer_ptr, selection_value);
+
+		result_data[result_offset++] = FetchStringFromDict(segment, dict, baseptr, NumericCast<int32_t>(dict_offset), str_len);
+	}
+
+}
+
 //===--------------------------------------------------------------------===//
 // Helper Functions
 //===--------------------------------------------------------------------===//
@@ -644,7 +683,7 @@ CompressionFunction DictionaryCompressionFun::GetFunction(PhysicalType data_type
 	    DictionaryCompressionStorage::InitCompression, DictionaryCompressionStorage::Compress,
 	    DictionaryCompressionStorage::FinalizeCompress, DictionaryCompressionStorage::StringInitScan,
 	    DictionaryCompressionStorage::StringScan, DictionaryCompressionStorage::StringScanPartial<false>,
-	    DictionaryCompressionStorage::StringFetchRow, UncompressedFunctions::EmptySkip);
+	    DictionaryCompressionStorage::StringFetchRow, UncompressedFunctions::EmptySkip, DictionaryCompressionStorage::StringFetchRowInSeg);
 }
 
 bool DictionaryCompressionFun::TypeIsSupported(PhysicalType type) {

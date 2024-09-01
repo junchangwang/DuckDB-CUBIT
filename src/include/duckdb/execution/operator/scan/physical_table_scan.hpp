@@ -84,9 +84,19 @@ public:
 	static void IndexRead_nofetch(vector<row_t> *row_ids, uint64_t begin, uint64_t end, cubit::Cubit *bitmap_shipdate,
 	                      cubit::Cubit *bitmap_discount, cubit::Cubit *bitmap_quantity, int lower_year, int upper_year,
 	                      int lower_discount, int upper_discount, int upper_quantity);
-	void TPCH_Q6_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
 	void TPCH_Q1(ExecutionContext &context) const;
+	void TPCH_Q3(ExecutionContext &context) const;
+	void TPCH_Q4(ExecutionContext &context) const;
 	void TPCH_Q5(ExecutionContext &context) const;
+	void TPCH_Q6_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
+	void TPCH_Q10(ExecutionContext &context) const;
+	void TPCH_Q12_Orders_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
+	void TPCH_Q14_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
+	void TPCH_Q15_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
+	void TPCH_Q17(ExecutionContext &context) const;
+	void TPCH_Q18_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
+	void TPCH_Q18_Orders_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
+	void TPCH_Q19_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const;
 };
 
 } // namespace duckdb

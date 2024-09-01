@@ -2,6 +2,7 @@
 #include "duckdb/parallel/thread_context.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
+#include "duckdb/tpch_constants.hpp"
 
 namespace duckdb {
 
@@ -28,6 +29,15 @@ PhysicalProjection::PhysicalProjection(vector<LogicalType> types, vector<unique_
 OperatorResultType PhysicalProjection::Execute(ExecutionContext &context, DataChunk &input, DataChunk &chunk,
                                                GlobalOperatorState &gstate, OperatorState &state_p) const {
 	auto &state = state_p.Cast<ProjectionState>();
+
+	// which is orderkey's projection within tpch-q18
+	if(state.executor.expressions.size() == 1 && input.data[0].GetType() == LogicalType::BIGINT && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q18) {
+		context.client.q18_orderkey.resize(input.size());
+		auto orderkey_data = FlatVector::GetData<int64_t>(input.data[0]);
+		for(auto i = 0; i < input.size(); i++) {
+			context.client.q18_orderkey[i] = orderkey_data[i];
+		}
+	}
 	state.executor.Execute(input, chunk);
 	return OperatorResultType::NEED_MORE_INPUT;
 }

@@ -249,20 +249,20 @@ ClientContext::ClientContext(shared_ptr<DatabaseInstance> database)
 	// test for shipdate
 
 	std::string s = "shipdate";
-	Table_config *config_shipdate = Make_Config(s, 7);
-	int state = Read_BM(config_shipdate, &bitmap_shipdate);
+	Table_config *config_shipdate = Make_Config(s, 10562, false);
+	int state = Read_BM(config_shipdate, &bitmap_shipdate, 59986052, false);
 
 	s = "discount";
-	Table_config *config_discount = Make_Config(s, 11);
-	state = Read_BM(config_discount, &bitmap_discount);
+	Table_config *config_discount = Make_Config(s, 11, false);
+	state = Read_BM(config_discount, &bitmap_discount,59986052 , false);
 
 	s = "quantity";
-	Table_config *config_quantity = Make_Config(s, 51);
-	state = Read_BM(config_quantity, &bitmap_quantity);
+	Table_config *config_quantity = Make_Config(s, 51, false);
+	state = Read_BM(config_quantity, &bitmap_quantity,59986052 , false);
 
 	s = "orderkey";
 	Table_config *config_orderkey = Make_Config(s, 6000000 * sf + 1, false);
-	state = Read_BM(config_orderkey, &bitmap_orderkey);
+	state = Read_BM(config_orderkey, &bitmap_orderkey, 59986052, false);
 
 	// 'O'->0  'F'->1
 	s = "linestatus";
@@ -273,10 +273,33 @@ ClientContext::ClientContext(shared_ptr<DatabaseInstance> database)
 	s = "returnflag";
 	Table_config *config_returnflag = Make_Config(s, 3, false);
 	state = Read_BM(config_returnflag, &bitmap_returnflag, 59986052, true);
-	
-	s = "shipdate_q1";
-	Table_config *config_shipdate_q1= Make_Config(s, 10562, false);
-	state = Read_BM(config_shipdate_q1, &bitmap_shipdate_q1, 59986052, false);
+
+	s = "suppkey";
+	Table_config *config_suppkey = Make_Config(s, 10000 * sf + 1, false);
+	state = Read_BM(config_suppkey, &bitmap_suppkey, 59986052, false);
+
+	s = "partkey";
+	Table_config *config_partkey = Make_Config(s, 200000 * sf + 1, false);
+	state = Read_BM(config_partkey, &bitmap_partkey, 59986052, false);
+
+	// ["REG AIR"] = 0 ["AIR"] = 1 ["RAIL"] = 2 ["SHIP"] = 3 ["TRUCK"] = 4 ["MAIL"] = 5 ["FOB"] = 6
+	s = "shipmode";
+	Table_config *config_shipmode = Make_Config(s, 7, false);
+	state = Read_BM(config_shipmode, &bitmap_shipmode, 59986052, true);
+
+	// ["DELIVER IN PERSON"] = 0 ["COLLECT COD"] = 1 cti["NONE"] = 2 cti["TAKE BACK RETURN"] = 3
+	s = "shipinstruct";
+	Table_config *config_shipinstruct = Make_Config(s, 4, false);
+	state = Read_BM(config_shipinstruct, &bitmap_shipinstruct, 59986052, true);
+
+	s = "o_orderkey";
+	Table_config *config_o_orderkey = Make_Config(s, 6000000 * sf + 1, false);
+	state = Read_BM(config_o_orderkey, &bitmap_o_orderkey, 15000000, false);
+
+	s = "receiptdate";
+	Table_config *config_receiptdate= Make_Config(s, 10562, false);
+	state = Read_BM(config_receiptdate, &bitmap_receiptdate, 59986052, false);
+
 	}
 	first++;
 

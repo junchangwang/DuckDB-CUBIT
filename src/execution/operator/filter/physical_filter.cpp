@@ -2,6 +2,7 @@
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
 #include "duckdb/parallel/thread_context.hpp"
+#include "duckdb/tpch_constants.hpp"
 namespace duckdb {
 
 PhysicalFilter::PhysicalFilter(vector<LogicalType> types, vector<unique_ptr<Expression>> select_list,
@@ -48,6 +49,13 @@ OperatorResultType PhysicalFilter::ExecuteInternal(ExecutionContext &context, Da
 		chunk.Reference(input);
 	} else {
 		chunk.Slice(input, state.sel, result_count);
+	}
+
+	// which is orderkey's filter within tpch-q12
+	if(context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q12) {
+		for(auto i = 0; i < chunk.size(); i++) {
+			context.client.q12_orderkey.push_back(chunk.data[0].GetValue(i).GetValueUnsafe<int64_t>());
+		}
 	}
 	return OperatorResultType::NEED_MORE_INPUT;
 }

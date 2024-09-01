@@ -22,6 +22,7 @@
 #include "duckdb/storage/table/scan_state.hpp"
 #include "duckdb/transaction/duck_transaction.hpp"
 #include "duckdb/transaction/transaction.hpp"
+#include "duckdb/tpch_constants.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -263,9 +264,33 @@ inline void reduce_zero(uint32_t *dst, uint32_t *src) {
 		_mm512_srlv_epi32(_mm512_loadu_epi32(src + 17), _mm512_set_epi32(0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14))), mask));
 }
 
+void GetRowids(ibis::bitvector &btv_res, vector<row_t> *row_ids) {
+	row_ids->resize(btv_res.count() + 64);
+	auto element_ptr = &(*row_ids)[0];
+
+	uint32_t ids_count = 0;
+	uint64_t ids_idx = 0;
+	// traverse m_vec
+	auto it = btv_res.m_vec.begin();
+	while(it != btv_res.m_vec.end()) {
+		vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, reverseBits(*it));
+		ids_idx += 31;
+		it++;
+	}
+
+	// active word
+	vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, \
+							reverseBits(btv_res.active.val << (31 - btv_res.active.nbits)));
+
+	row_ids->resize(btv_res.count());
+
+	std::cout << "fetch rows : " << row_ids->size() << std::endl;
+}
+
 bool q1_using_bitmap = 1;
 bool q1_using_idlist = 0;
 void PhysicalTableScan::TPCH_Q1(ExecutionContext &context) const {
+	auto s0 = std::chrono::high_resolution_clock::now();
 
 	auto &lineitem_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "lineitem", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
 	
@@ -456,8 +481,6 @@ void PhysicalTableScan::TPCH_Q1(ExecutionContext &context) const {
 					// active word
 					vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, \
 											reverseBits(btv_res.active.val << (31 - btv_res.active.nbits)));
-					
-					assert(ids_count == ids.size());
 
 					ids.resize(btv_res.count());
 
@@ -537,7 +560,7 @@ void PhysicalTableScan::TPCH_Q1(ExecutionContext &context) const {
 			long long timeids = 0;
 			auto cubit_linestatus = dynamic_cast<cubit::Cubit *>(context.client.bitmap_linestatus);
 			auto cubit_returnflag = dynamic_cast<cubit::Cubit *>(context.client.bitmap_returnflag);
-			auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate_q1);
+			auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
 
 			auto &lineitem_transaction = DuckTransaction::Get(context.client, lineitem_table.catalog);
 			TableScanState lineitem_scan_state;
@@ -703,14 +726,466 @@ void PhysicalTableScan::TPCH_Q1(ExecutionContext &context) const {
 		}
 	}
 
+	auto s1 = std::chrono::high_resolution_clock::now();
+
 	for(auto &it : q1_ans) {
 		std::cout << it.first.first << it.first.second << " : " << it.second << std::endl;
 	}
+
+	std::cout << "q1 time : " << std::chrono::duration_cast<std::chrono::milliseconds>(s1 - s0).count() << "ms" << std::endl;
 
 	return;
 
 }
 
+struct q3_topk {
+	bool operator ()(std::pair<int64_t, int64_t> &a, std::pair<int64_t, int64_t> &b) {
+		return a.second > b.second;
+	}
+};
+
+bool q3_using_bitmap = 0;
+void PhysicalTableScan::TPCH_Q3(ExecutionContext &context) const {
+	auto s0 = std::chrono::high_resolution_clock::now();
+	auto &customer_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "customer", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+	auto &lineitem_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "lineitem", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+	auto &orders_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "orders", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+	
+	long long time_fetch = 0;
+	long long time_ids = 0;
+	long long time_bitmap = 0;
+
+	char *msg = "BUILDING";
+	int32_t filter_days = 9204;
+
+	auto s1 = std::chrono::high_resolution_clock::now();
+
+	std::bitset<1500001> custkey_b;
+	{
+		auto &customer_transaction = DuckTransaction::Get(context.client, customer_table.catalog);
+		TableScanState customer_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(6));
+		customer_table.GetStorage().InitializeScan(customer_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(customer_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(customer_table.GetColumns().GetColumnTypes()[6]);
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+			customer_table.GetStorage().Scan(customer_transaction, result, customer_scan_state);
+			if(result.size() == 0)
+				break;
+
+			auto &customer_key = result.data[0];
+			auto &mktsegment = result.data[1];
+			auto customer_key_data = FlatVector::GetData<int64_t>(customer_key);
+
+			if(result.data[1].GetVectorType() == VectorType::DICTIONARY_VECTOR) {
+				auto &mktsegment_sel_vector = DictionaryVector::SelVector(result.data[1]);
+				auto &mktsegment_child = DictionaryVector::Child(result.data[1]);
+
+				for(int i = 0; i < result.size(); i++) {
+					if(!strcmp(reinterpret_cast<string_t *>(mktsegment_child.GetData())[mktsegment_sel_vector.get_index(i)].GetData(), msg))
+						custkey_b[customer_key_data[i]] = 1;
+				}
+			}
+			else {
+				for(int i = 0; i < result.size(); i++) {
+					if(!strcmp(reinterpret_cast<string_t *>(mktsegment.GetData())[i].GetData(), msg))
+						custkey_b[customer_key_data[i]] = 1;
+				}
+			}
+		}
+	}
+
+	auto s2 = std::chrono::high_resolution_clock::now();
+
+	std::unordered_map<int32_t, std::pair<int32_t, int32_t>> orderkey_map;
+	// vector<std::pair<int32_t, int32_t>*> orderkey_map_vec(60000001);
+	uint64_t tmp = 0;
+
+	ibis::bitvector btv_res;
+	auto cubit_orderkey = dynamic_cast<cubit::Cubit *>(context.client.bitmap_orderkey);
+	btv_res.adjustSize(0, cubit_orderkey->config->n_rows);
+	btv_res.decompress();
+
+	{
+		auto &orders_transaction = DuckTransaction::Get(context.client, orders_table.catalog);
+		TableScanState orders_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(1));
+		storage_column_ids.push_back(uint64_t(4));
+		storage_column_ids.push_back(uint64_t(7));
+		orders_table.GetStorage().InitializeScan(orders_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[1]);
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[4]);
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[7]);
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+			orders_table.GetStorage().Scan(orders_transaction, result, orders_scan_state);
+			if(result.size() == 0)
+				break;
+
+			auto &order_key = result.data[0];
+			auto &customer_key = result.data[1];
+			auto &orderdate = result.data[2];
+			auto &shippriority = result.data[3];
+			auto order_key_data = FlatVector::GetData<int64_t>(order_key);
+			auto customer_key_data = FlatVector::GetData<int64_t>(customer_key);
+			auto orderdate_data = FlatVector::GetData<int32_t>(orderdate);
+			auto shippriority_data = FlatVector::GetData<int32_t>(shippriority);
+
+			for(int i = 0; i < result.size(); i++) {
+				// if(orderdate_data[i] < filter_days && custkey_set.count(customer_key_data[i]))
+				if(orderdate_data[i] < filter_days && custkey_b[customer_key_data[i]]) {
+				// if(orderdate_data[i] < filter_days)
+					// orderkey_map[order_key_data[i]] = {orderdate_data[i], shippriority_data[i]};
+					orderkey_map.emplace(order_key_data[i], std::make_pair(orderdate_data[i], shippriority_data[0])); 
+					// orderkey_map_vec[order_key_data[i]] = new std::pair(orderdate_data[i], shippriority_data[0]);
+					// orderkey_vec.emplace_back(order_key_data[i]);
+					btv_res |= *cubit_orderkey->bitmaps[order_key_data[i]]->btv;
+				}
+			}
+		}
+	}
+
+	auto s3 = std::chrono::high_resolution_clock::now();
+
+	std::unordered_map<int64_t, int64_t> l_orderkey_map;
+
+	{
+		auto cubit_orderkey = dynamic_cast<cubit::Cubit *>(context.client.bitmap_orderkey);
+		auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
+		auto &lineitem_transaction = DuckTransaction::Get(context.client, lineitem_table.catalog);
+		TableScanState lineitem_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(5));
+		storage_column_ids.push_back(uint64_t(6));
+		lineitem_table.GetStorage().InitializeScan(lineitem_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[5]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[6]);
+
+
+		vector<row_t> *ids = new vector<row_t>;
+		size_t cursor = 0;
+
+		auto st_bitmap = std::chrono::high_resolution_clock::now();
+
+		ibis::bitvector btv_shipdate;
+		btv_shipdate.copy(*cubit_shipdate->bitmaps[filter_days + 1]->btv);
+		btv_shipdate.decompress();
+
+		for(uint32_t i = filter_days + 2; i < cubit_shipdate->config->g_cardinality; i++) {
+			btv_shipdate |= *cubit_shipdate->bitmaps[i]->btv;
+		}
+
+		btv_res &= btv_shipdate;
+
+		auto et_bitmap = std::chrono::high_resolution_clock::now();
+		time_bitmap += std::chrono::duration_cast<std::chrono::nanoseconds>(et_bitmap - st_bitmap).count();
+
+		auto st_ids = std::chrono::high_resolution_clock::now();
+
+		for (ibis::bitvector::indexSet index_set = btv_res.firstIndexSet(); index_set.nIndices() > 0; ++index_set) {
+			const ibis::bitvector::word_t *indices = index_set.indices();
+			if (index_set.isRange()) {
+				for (ibis::bitvector::word_t j = *indices; j < indices[1]; ++j) {
+					ids->push_back((uint64_t)j);
+				}
+			} else {
+				for (unsigned j = 0; j < index_set.nIndices(); ++j) {
+					ids->push_back((uint64_t)indices[j]);
+				}
+			}
+		}
+
+		auto et_ids = std::chrono::high_resolution_clock::now();
+		time_ids += std::chrono::duration_cast<std::chrono::nanoseconds>(et_ids - st_ids).count();
+
+		while(true) {
+			auto st_fetch = std::chrono::high_resolution_clock::now();
+			
+			DataChunk result;
+			result.Initialize(context.client, types);
+
+			if(cursor < ids->size()) {
+				ColumnFetchState column_fetch_state;
+				data_ptr_t row_ids_data = nullptr;
+				row_ids_data = (data_ptr_t)&((*ids)[cursor]);
+				Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+				idx_t fetch_count = 2048;
+				if(cursor + fetch_count > ids->size()) {
+					fetch_count = ids->size() - cursor;
+				}
+				lineitem_table.GetStorage().Fetch(lineitem_transaction, result, storage_column_ids, row_ids_vec, fetch_count,
+														column_fetch_state);
+
+				cursor += fetch_count;
+			}
+			else {
+				delete ids;
+				break;
+			}
+			auto et_fetch = std::chrono::high_resolution_clock::now();
+			time_fetch += std::chrono::duration_cast<std::chrono::nanoseconds>(et_fetch - st_fetch).count();
+
+			auto &order_key = result.data[0];
+			auto &extendedprice = result.data[1];
+			auto &discount = result.data[2];
+			auto order_key_data = FlatVector::GetData<int64_t>(order_key);
+			auto extendedprice_data = FlatVector::GetData<int64_t>(extendedprice);
+			auto discount_data = FlatVector::GetData<int64_t>(discount);
+
+			for(int i = 0; i < result.size(); i++) {
+				l_orderkey_map[order_key_data[i]] += extendedprice_data[i] * (100 - discount_data[i]);
+			}
+		}
+	}
+
+	std::priority_queue<std::pair<int64_t, int64_t>,vector<std::pair<int64_t, int64_t>>,q3_topk> minHeap;
+	int heapc = 10;
+
+	for(auto &it : l_orderkey_map) {
+		if(minHeap.size() < heapc)
+			minHeap.push(it);
+		else {
+			if(it.second <= minHeap.top().second)
+				continue;
+			minHeap.pop();
+			minHeap.push(it);
+		}
+	}
+
+	while(!minHeap.empty()) {
+		std::cout << minHeap.top().first << " : " << minHeap.top().second << " : " << \
+		 orderkey_map[minHeap.top().first].first << " : " << orderkey_map[minHeap.top().first].second << std::endl;
+
+		// std::cout << minHeap.top().first << " : " << minHeap.top().second << " : " << std::endl;
+
+
+		// std::cout << minHeap.top().first << " : " << minHeap.top().second << " : " << \
+		//  orderkey_map_vec[minHeap.top().first]->first << " : " << orderkey_map_vec[minHeap.top().first]->second << std::endl;
+		minHeap.pop();
+	}
+
+	auto s4 = std::chrono::high_resolution_clock::now();
+
+	// std::cout << "customer num : " << custkey_b.count() << std::endl;
+	// std::cout << "orders num : " << orderkey_map.size() << std::endl;
+	// std::cout << "orders num : " << orderkey_set.size() << std::endl;
+	// std::cout << "lineitem num : " << l_orderkey_map.size() << std::endl;
+	// std::cout << tmp << std::endl;
+
+	std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s3 - s2).count() << "ms" << std::endl;
+	std::cout << "bitmap time : " << time_bitmap / 1000000 << "ms" << std::endl;
+	std::cout << "ids time : " << time_ids / 1000000 << "ms" << std::endl;
+	std::cout << "fetch time : " << time_fetch / 1000000 << "ms" << std::endl;
+	std::cout << "q3 time : " << std::chrono::duration_cast<std::chrono::milliseconds>(s4 - s0).count() << "ms" << std::endl;
+
+
+}
+
+void PhysicalTableScan::TPCH_Q4(ExecutionContext &context) const {
+	
+	auto s0 = std::chrono::high_resolution_clock::now();
+
+	auto &orders_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "orders", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+	auto &lineitem_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "lineitem", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+
+	int32_t left_days = 8582;
+	int32_t right_days = 8673;
+
+	std::unordered_map<int32_t, std::string> priority_map;
+	std::unordered_map<std::string, int32_t> sti_map;
+	priority_map[5] = "5-LOW";
+	priority_map[1] = "1-URGENT";
+	priority_map[4] = "4-NOT SPECIFIED";
+	priority_map[2] = "2-HIGH";
+	priority_map[3] = "3-MEDIUM";
+	sti_map["5-LOW"] = 5;
+	sti_map["1-URGENT"] = 1;
+	sti_map["4-NOT SPECIFIED"] = 4;
+	sti_map["2-HIGH"] = 2;
+	sti_map["3-MEDIUM"] = 3;
+
+
+	std::unordered_map<int64_t, int32_t> orderkey_map;
+	orderkey_map.reserve(580000);
+	{
+		auto &orders_transaction = DuckTransaction::Get(context.client, orders_table.catalog);
+		TableScanState orders_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(4));
+		storage_column_ids.push_back(uint64_t(5));
+		orders_table.GetStorage().InitializeScan(orders_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[4]);
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[5]);
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+			orders_table.GetStorage().Scan(orders_transaction, result, orders_scan_state);
+			if(result.size() == 0)
+				break;
+
+			auto order_key_data = FlatVector::GetData<int64_t>(result.data[0]);
+			auto date_data = FlatVector::GetData<int32_t>(result.data[1]);
+
+			if(result.data[2].GetVectorType() == VectorType::DICTIONARY_VECTOR) {
+				auto &sel_vec = DictionaryVector::SelVector(result.data[2]);
+				auto &child_vec = DictionaryVector::Child(result.data[2]);
+				for(int i = 0; i < result.size(); i++) {
+					if(date_data[i] >= left_days && date_data[i] <= right_days)
+						orderkey_map[order_key_data[i]] = sti_map[reinterpret_cast<string_t *>(child_vec.GetData())[sel_vec.get_index(i)].GetString()];
+				}
+			}
+			else {
+				for(int i = 0; i < result.size(); i++) {
+					if(date_data[i] >= left_days && date_data[i] <= right_days)
+						orderkey_map[order_key_data[i]] = sti_map[reinterpret_cast<string_t *>(result.data[2].GetData())[i].GetString()];
+				}
+			}
+		}
+	}
+
+	auto s1 = std::chrono::high_resolution_clock::now();
+
+	long long time_ids = 0;
+	long long time_fetch = 0;
+	long long time_bitmap = 0;
+	std::unordered_set<int64_t> orderkey_set;
+	orderkey_set.reserve(570000);
+	{
+		auto cubit_orderkey = dynamic_cast<cubit::Cubit *>(context.client.bitmap_orderkey);
+		auto &lineitem_transaction = DuckTransaction::Get(context.client, lineitem_table.catalog);
+		TableScanState lineitem_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(11));
+		storage_column_ids.push_back(uint64_t(12));
+		lineitem_table.GetStorage().InitializeScan(lineitem_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[11]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[12]);
+
+		auto s_bitmap = std::chrono::high_resolution_clock::now();
+		ibis::bitvector btv_res;
+		auto it1 = orderkey_map.begin();
+		btv_res.copy(*cubit_orderkey->bitmaps[it1->first]->btv);
+		btv_res.decompress();
+		it1++;
+		while(it1 != orderkey_map.end()) {
+			btv_res |= *cubit_orderkey->bitmaps[it1->first]->btv;
+			it1++;
+		}
+
+		auto s_ids = std::chrono::high_resolution_clock::now();
+
+		time_bitmap = std::chrono::duration_cast<std::chrono::milliseconds>(s_ids - s_bitmap).count();
+
+		vector<row_t> *row_ids = new vector<row_t>;
+		size_t cursor = 0;
+
+		row_ids->resize(btv_res.count() + 64);
+		// ids[btv_res.count()] = 999999999;
+		auto element_ptr = &(*row_ids)[0];
+
+		uint32_t ids_count = 0;
+		uint64_t ids_idx = 0;
+		// traverse m_vec
+		auto it = btv_res.m_vec.begin();
+		while(it != btv_res.m_vec.end()) {
+			vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, reverseBits(*it));
+			ids_idx += 31;
+			it++;
+		}
+
+		// active word
+		vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, \
+								reverseBits(btv_res.active.val << (31 - btv_res.active.nbits)));
+
+		row_ids->resize(btv_res.count());
+
+		auto e_ids = std::chrono::high_resolution_clock::now();
+		time_ids = std::chrono::duration_cast<std::chrono::milliseconds>(e_ids - s_ids).count();
+
+		while(true) {
+			auto s_fetch = std::chrono::high_resolution_clock::now();
+			DataChunk result;
+			result.Initialize(context.client, types);
+
+			if(cursor < row_ids->size()) {
+				ColumnFetchState column_fetch_state;
+				data_ptr_t row_ids_data = nullptr;
+				row_ids_data = (data_ptr_t)&((*row_ids)[cursor]);
+				Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+				idx_t fetch_count = 2048;
+				if(cursor + fetch_count > row_ids->size()) {
+					fetch_count = row_ids->size() - cursor;
+				}
+				lineitem_table.GetStorage().Fetch(lineitem_transaction, result, storage_column_ids, row_ids_vec, fetch_count,
+														column_fetch_state);
+
+				cursor += fetch_count;
+			}
+			else {
+				delete row_ids;
+				break;
+			}
+			auto e_fetch = std::chrono::high_resolution_clock::now();
+			time_fetch += std::chrono::duration_cast<std::chrono::nanoseconds>(e_fetch - s_fetch).count();
+
+			auto order_key_data = FlatVector::GetData<int64_t>(result.data[0]);
+			auto commitdate_data = FlatVector::GetData<int32_t>(result.data[1]);
+			auto receiptdate_data = FlatVector::GetData<int32_t>(result.data[2]);
+
+			auto s_c = std::chrono::high_resolution_clock::now();
+
+			for(int i = 0; i < result.size(); i++) {
+				if(commitdate_data[i] < receiptdate_data[i]) {
+					orderkey_set.insert(order_key_data[i]);
+				}
+			}
+		}
+	}
+	
+	auto s2 = std::chrono::high_resolution_clock::now();
+
+	std::map<int32_t, int32_t> q4_ans;
+	{
+		for(auto orderkey : orderkey_set) {
+			q4_ans[orderkey_map[orderkey]]++;
+		}
+	}
+	
+	auto s3 = std::chrono::high_resolution_clock::now();
+
+	for(auto &it : q4_ans) {
+		std::cout << priority_map[it.first] << " : " << it.second << std::endl;
+	} 
+
+	std::cout << "fetch time : " << time_fetch / 1000000 << "ms" << std::endl;
+	std::cout << "ids time : " << time_ids / 1000000 << "ms" << std::endl;
+	std::cout << "bitmap time : " << time_bitmap << "ms" << std::endl;
+	std::cout << "q4 time : " << std::chrono::duration_cast<std::chrono::milliseconds>(s3 - s0).count() << "ms" << std::endl;
+}
 
 bool q5_using_bitmap = 1;
 void PhysicalTableScan::TPCH_Q5(ExecutionContext &context) const {
@@ -1057,30 +1532,666 @@ void PhysicalTableScan::TPCH_Q5(ExecutionContext &context) const {
 
 	auto s7 = std::chrono::high_resolution_clock::now();
 
-	std::cout << "--------------------------------" << std::endl;
-	std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s2 - s1).count() << "ms" << std::endl;
-	std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s3 - s2).count() << "ms" << std::endl;
-	std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s4 - s3).count() << "ms" << std::endl;
-	std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s5 - s4).count() << "ms" << std::endl;
-	std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s6 - s5).count() << "ms" << std::endl;
-	std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s7 - s6).count() << "ms" << std::endl;
-	std::cout << "--------------------------------" << std::endl;
+	// std::cout << "--------------------------------" << std::endl;
+	// std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s2 - s1).count() << "ms" << std::endl;
+	// std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s3 - s2).count() << "ms" << std::endl;
+	// std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s4 - s3).count() << "ms" << std::endl;
+	// std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s5 - s4).count() << "ms" << std::endl;
+	// std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s6 - s5).count() << "ms" << std::endl;
+	// std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(s7 - s6).count() << "ms" << std::endl;
+	// std::cout << "--------------------------------" << std::endl;
 	return;
 
 }
 
+void PhysicalTableScan::TPCH_Q6_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const {
+	auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
+	auto cubit_discount = dynamic_cast<cubit::Cubit *>(context.client.bitmap_discount);
+	auto cubit_quantity = dynamic_cast<cubit::Cubit *>(context.client.bitmap_quantity);
+
+	// '1994-01-01'
+	int lower_days = 8766;
+
+	// '1995-01-01' - 1
+	int upper_days = 9130;
+
+	int lower_discount = 5;
+	int upper_discount = 7;
+
+	int upper_quantity = 23;
+
+	auto s0 = std::chrono::high_resolution_clock::now();
+
+	ibis::bitvector btv_shipdate;
+	btv_shipdate.copy(*cubit_shipdate->bitmaps[lower_days]->btv);
+	btv_shipdate.decompress();
+
+	for(int i = lower_days + 1; i <= upper_days; i++) {
+		btv_shipdate |= *cubit_shipdate->bitmaps[i]->btv;
+	}
+
+	auto s1 = std::chrono::high_resolution_clock::now();
+
+	ibis::bitvector btv_discount;
+	btv_discount.copy(*cubit_discount->bitmaps[lower_discount]->btv);
+	btv_discount.decompress();
+
+	for(int i = lower_discount + 1; i <= upper_discount; i++) {
+		btv_discount |= *cubit_discount->bitmaps[i]->btv;
+	}
+
+	auto s2 = std::chrono::high_resolution_clock::now();
+
+	ibis::bitvector btv_quantity;
+	btv_quantity.copy(*cubit_quantity->bitmaps[1]->btv);
+	btv_quantity.decompress();
+
+	for(int i = 2; i <= upper_quantity; i++) {
+		btv_quantity |= *cubit_quantity->bitmaps[i]->btv;
+	}
+
+	auto s3 = std::chrono::high_resolution_clock::now();
+
+	auto &btv_res = btv_shipdate;
+	btv_res &= btv_discount;
+	btv_res &= btv_quantity;
+
+	auto s4 = std::chrono::high_resolution_clock::now();
+	
+	GetRowids(btv_res, row_ids);
+
+	auto s5 = std::chrono::high_resolution_clock::now();
+
+	std::cout << "shipdate's bitmap time : " << std::chrono::duration_cast<std::chrono::milliseconds>(s1 - s0).count() << "ms" << std::endl;
+	std::cout << "discount's bitmap time : " << std::chrono::duration_cast<std::chrono::milliseconds>(s2 - s1).count() << "ms" << std::endl;
+	std::cout << "quantity's bitmap time : " << std::chrono::duration_cast<std::chrono::milliseconds>(s3 - s2).count() << "ms" << std::endl;
+	std::cout << "bitmaps time : " << std::chrono::duration_cast<std::chrono::milliseconds>(s4 - s0).count() << "ms" << std::endl;
+	std::cout << "get row id : " << std::chrono::duration_cast<std::chrono::milliseconds>(s5 - s4).count() << "ms" << std::endl;
+
+}
+
+struct pair_hash {
+	template <class T1, class T2>
+	std::size_t operator() (const std::pair<T1, T2>& p) const {
+		auto h1 = std::hash<T1>{}(p.first);
+		auto h2 = std::hash<T2>{}(p.second);
+		return h1 ^ (h2 << 1);
+	}
+};
+
+struct q10_topk {
+	bool operator ()(std::pair<int64_t, int64_t> &a, std::pair<int64_t, int64_t> &b) {
+		return a.second > b.second;
+	}
+};
+
+void PhysicalTableScan::TPCH_Q10(ExecutionContext &context) const {
+
+	auto s0 = std::chrono::high_resolution_clock::now();
+
+	auto &nation_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "nation", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+	auto &customer_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "customer", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+	auto &lineitem_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "lineitem", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+	auto &orders_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "orders", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+
+	const char returnflag = 'R';
+
+	std::unordered_map<int32_t, std::string> nation_map;
+	{
+		auto &nation_transaction = DuckTransaction::Get(context.client, nation_table.catalog);
+		TableScanState nation_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(1));
+		nation_table.GetStorage().InitializeScan(nation_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(nation_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(nation_table.GetColumns().GetColumnTypes()[1]);
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+			nation_table.GetStorage().Scan(nation_transaction, result, nation_scan_state);
+			if(result.size() == 0)
+				break;
+
+			auto &nation_key = result.data[0];
+			auto nation_key_data = FlatVector::GetData<int32_t>(nation_key);
+
+			for(int i = 0; i < result.size(); i++) {
+				nation_map[nation_key_data[i]] = "tmp";
+			}
+		}
+	}
+
+	std::unordered_map<int64_t, int32_t> customer_nation_map;
+	// customer_nation_map.reserve(1500000);
+	{
+		auto &customer_transaction = DuckTransaction::Get(context.client, customer_table.catalog);
+		TableScanState customer_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(3));
+		// storage_column_ids.push_back(uint64_t(1));
+		// storage_column_ids.push_back(uint64_t(2));
+		// storage_column_ids.push_back(uint64_t(4));
+		// storage_column_ids.push_back(uint64_t(5));
+		// storage_column_ids.push_back(uint64_t(7));
+		customer_table.GetStorage().InitializeScan(customer_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(customer_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(customer_table.GetColumns().GetColumnTypes()[3]);
+		// types.push_back(customer_table.GetColumns().GetColumnTypes()[1]);
+		// types.push_back(customer_table.GetColumns().GetColumnTypes()[2]);
+		// types.push_back(customer_table.GetColumns().GetColumnTypes()[4]);
+		// types.push_back(customer_table.GetColumns().GetColumnTypes()[5]);
+		// types.push_back(customer_table.GetColumns().GetColumnTypes()[7]);
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+			customer_table.GetStorage().Scan(customer_transaction, result, customer_scan_state);
+			if(result.size() == 0)
+				break;
+
+			auto &customer_key = result.data[0];
+			auto &nation_key = result.data[1];
+			auto customer_key_data = FlatVector::GetData<int64_t>(customer_key);
+			auto nation_key_data = FlatVector::GetData<int32_t>(nation_key);
+
+			for(int i = 0; i < result.size(); i++) {
+				if(nation_map.count(nation_key_data[i]))
+					customer_nation_map[customer_key_data[i]] = nation_key_data[i];
+			}
+		}
+	}
+
+	auto cubit_orderkey = dynamic_cast<cubit::Cubit *>(context.client.bitmap_orderkey);
+	ibis::bitvector btv_res;
+	btv_res.adjustSize(0, cubit_orderkey->config->n_rows);
+	btv_res.decompress();
+	std::unordered_map<int64_t, std::pair<int64_t, int32_t>> order_map;
+	{
+		auto &orders_transaction = DuckTransaction::Get(context.client, orders_table.catalog);
+		TableScanState orders_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(1));
+		storage_column_ids.push_back(uint64_t(4));
+		orders_table.GetStorage().InitializeScan(orders_transaction, orders_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[1]);
+		types.push_back(orders_table.GetColumns().GetColumnTypes()[4]);
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+			orders_table.GetStorage().Scan(orders_transaction, result, orders_scan_state);
+			if(result.size() == 0)
+				break;
+
+			auto &orders_key = result.data[0];
+			auto &customer_key = result.data[1];
+			auto &days = result.data[2];
+			auto orders_key_data = FlatVector::GetData<int64_t>(orders_key);
+			auto customer_key_data = FlatVector::GetData<int64_t>(customer_key);
+			auto days_data = FlatVector::GetData<int32_t>(days);
+
+			for(int i = 0; i < result.size(); i++) {
+				if(days_data[i] < 8766 && days_data[i] >= 8674) {
+					if(customer_nation_map.count(customer_key_data[i])) {
+						btv_res |= *cubit_orderkey->bitmaps[orders_key_data[i]]->btv;
+						order_map[orders_key_data[i]] = {customer_key_data[i], customer_nation_map[customer_key_data[i]]};
+					}
+				}
+			}
+		}
+	}
+
+	std::unordered_map<std::pair<int64_t, int32_t>, int64_t, pair_hash> group_map;
+	{
+		long long time1 = 0;
+		auto cubit_returnflag = dynamic_cast<cubit::Cubit *>(context.client.bitmap_returnflag);
+		auto &lineitem_transaction = DuckTransaction::Get(context.client, lineitem_table.catalog);
+		TableScanState lineitem_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(5));
+		storage_column_ids.push_back(uint64_t(6));
+		// storage_column_ids.push_back(uint64_t(8));
+		lineitem_table.GetStorage().InitializeScan(lineitem_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[5]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[6]);
+		// types.push_back(lineitem_table.GetColumns().GetColumnTypes()[8]);
+
+		// 1 is 'R'
+		btv_res &= *cubit_returnflag->bitmaps[1]->btv;
+
+
+		vector<row_t> *row_ids = new vector<row_t>;
+		size_t cursor = 0;
+
+		row_ids->resize(btv_res.count() + 64);
+		// ids[btv_res.count()] = 999999999;
+		auto element_ptr = &(*row_ids)[0];
+
+		uint32_t ids_count = 0;
+		uint64_t ids_idx = 0;
+		// traverse m_vec
+		auto it = btv_res.m_vec.begin();
+		while(it != btv_res.m_vec.end()) {
+			vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, reverseBits(*it));
+			ids_idx += 31;
+			it++;
+		}
+
+		// active word
+		vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, \
+								reverseBits(btv_res.active.val << (31 - btv_res.active.nbits)));
+
+		row_ids->resize(btv_res.count());
+
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+
+			if(cursor < row_ids->size()) {
+				ColumnFetchState column_fetch_state;
+				data_ptr_t row_ids_data = nullptr;
+				row_ids_data = (data_ptr_t)&((*row_ids)[cursor]);
+				Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+				idx_t fetch_count = 2048;
+				if(cursor + fetch_count > row_ids->size()) {
+					fetch_count = row_ids->size() - cursor;
+				}
+				lineitem_table.GetStorage().Fetch(lineitem_transaction, result, storage_column_ids, row_ids_vec, fetch_count,
+														column_fetch_state);
+
+				cursor += fetch_count;
+			}
+			else {
+				delete row_ids;
+				break;
+			}
+
+			auto &order_key = result.data[0];
+			auto &extenedprice = result.data[1];
+			auto &discount = result.data[2];
+			auto order_key_data = FlatVector::GetData<int64_t>(order_key);
+			auto extenedprice_data = FlatVector::GetData<int64_t>(extenedprice);
+			auto discount_data = FlatVector::GetData<int64_t>(discount);
+
+			for(int i = 0; i < result.size(); i++) {
+					group_map[order_map[order_key_data[i]]] += extenedprice_data[i] * (100 - discount_data[i]);
+			}
+		}
+
+	}
+
+	std::priority_queue<std::pair<int64_t, int64_t>,vector<std::pair<int64_t, int64_t>>,q10_topk> minHeap;
+	int heapc = 20;
+
+	for(auto &it : group_map) {
+		if(minHeap.size() < heapc)
+			minHeap.push({it.first.first, it.second});
+		else {
+			if(it.second <= minHeap.top().second)
+				continue;
+			minHeap.pop();
+			minHeap.push({it.first.first, it.second});
+		}
+	}
+
+	while(!minHeap.empty()) {
+		std::cout << minHeap.top().first << " : " << minHeap.top().second << std::endl;
+		minHeap.pop();
+	}
+
+	auto e0 = std::chrono::high_resolution_clock::now();
+
+	std::cout << "q10 time : " << std::chrono::duration_cast<std::chrono::milliseconds>(e0 - s0).count() << "ms" << std::endl;
+
+}
+
+void PhysicalTableScan::TPCH_Q12_Orders_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const {
+	auto cubit_orderkey = dynamic_cast<cubit::Cubit *>(context.client.bitmap_o_orderkey);
+
+	ibis::bitvector btv_res;
+	btv_res.adjustSize(0, cubit_orderkey->config->n_rows);
+	btv_res.decompress();
+
+	for(auto orderkey : context.client.q12_orderkey) {
+		btv_res |= *cubit_orderkey->bitmaps[orderkey]->btv;
+	}
+
+	GetRowids(btv_res, row_ids);
+}
+
+void PhysicalTableScan::TPCH_Q14_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const {
+	auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
+
+	int lower_days = 9374;
+	int upper_days = 9404;
+
+	ibis::bitvector btv_res;
+	btv_res.copy(*cubit_shipdate->bitmaps[lower_days]->btv);
+	btv_res.decompress();
+
+	for(int i = lower_days + 1; i < upper_days; i++) {
+		btv_res |= *cubit_shipdate->bitmaps[i]->btv;
+	}
+
+	row_ids->resize(btv_res.count() + 64);
+	auto element_ptr = &(*row_ids)[0];
+
+	uint32_t ids_count = 0;
+	uint64_t ids_idx = 0;
+	// traverse m_vec
+	auto it = btv_res.m_vec.begin();
+	while(it != btv_res.m_vec.end()) {
+		vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, reverseBits(*it));
+		ids_idx += 31;
+		it++;
+	}
+
+	// active word
+	vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, \
+							reverseBits(btv_res.active.val << (31 - btv_res.active.nbits)));
+
+	row_ids->resize(btv_res.count());
+
+	std::cout << row_ids->size() << std::endl;
+}
+
+void PhysicalTableScan::TPCH_Q15_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const {
+	auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
+
+	int lower_days = 9496;
+	int upper_days = 9587;
+
+	ibis::bitvector btv_res;
+	btv_res.copy(*cubit_shipdate->bitmaps[lower_days]->btv);
+	btv_res.decompress();
+
+	for(int i = lower_days + 1; i < upper_days; i++) {
+		btv_res |= *cubit_shipdate->bitmaps[i]->btv;
+	}
+
+	row_ids->resize(btv_res.count() + 64);
+	auto element_ptr = &(*row_ids)[0];
+
+	uint32_t ids_count = 0;
+	uint64_t ids_idx = 0;
+	// traverse m_vec
+	auto it = btv_res.m_vec.begin();
+	while(it != btv_res.m_vec.end()) {
+		vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, reverseBits(*it));
+		ids_idx += 31;
+		it++;
+	}
+
+	// active word
+	vbmi2_decoder_cvtepu16(element_ptr, ids_count, ids_idx, \
+							reverseBits(btv_res.active.val << (31 - btv_res.active.nbits)));
+
+	row_ids->resize(btv_res.count());
+
+	std::cout << row_ids->size() << std::endl;
+}
+
+void PhysicalTableScan::TPCH_Q17(ExecutionContext &context) const {
+	auto s0 = std::chrono::high_resolution_clock::now();
+	auto &part_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "part", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+	auto &lineitem_table = Catalog::GetEntry(context.client, CatalogType::TABLE_ENTRY, "", "", "lineitem", OnEntryNotFound::RETURN_NULL)->Cast<TableCatalogEntry>();
+
+	const char *brand = "Brand#23";
+	const char *container = "MED BOX";
+
+	ibis::bitvector btv_res;
+	auto cubit_partkey = dynamic_cast<cubit::Cubit *>(context.client.bitmap_partkey);
+	btv_res.adjustSize(0, cubit_partkey->config->n_rows);
+	btv_res.decompress();
+	{
+		auto &part_transaction = DuckTransaction::Get(context.client, part_table.catalog);
+		TableScanState part_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(0));
+		storage_column_ids.push_back(uint64_t(3));
+		storage_column_ids.push_back(uint64_t(6));
+		part_table.GetStorage().InitializeScan(part_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(part_table.GetColumns().GetColumnTypes()[0]);
+		types.push_back(part_table.GetColumns().GetColumnTypes()[3]);
+		types.push_back(part_table.GetColumns().GetColumnTypes()[6]);
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+			part_table.GetStorage().Scan(part_transaction, result, part_scan_state);
+			if(result.size() == 0)
+				break;
+
+			auto &part_key = result.data[0];
+			auto &part_brand = result.data[1];
+			auto &part_container = result.data[2];
+			auto part_key_data = FlatVector::GetData<int64_t>(part_key);
+
+			if(part_brand.GetVectorType() == VectorType::DICTIONARY_VECTOR) {
+				auto &brand_sel_vector = DictionaryVector::SelVector(part_brand);
+				auto &brand_child = DictionaryVector::Child(part_brand);
+				auto &container_sel_vector = DictionaryVector::SelVector(part_container);
+				auto &container_child = DictionaryVector::Child(part_container);
+
+				for(int i = 0; i < result.size(); i++) {
+					if(!strcmp(reinterpret_cast<string_t *>(brand_child.GetData())[brand_sel_vector.get_index(i)].GetData(), brand) && \
+						!strcmp(reinterpret_cast<string_t *>(container_child.GetData())[container_sel_vector.get_index(i)].GetData(), container))
+						btv_res |= *cubit_partkey->bitmaps[part_key_data[i]]->btv;
+				}
+			}
+			else {
+				for(int i = 0; i < result.size(); i++) {
+					if(!strcmp(reinterpret_cast<string_t *>(part_brand.GetData())[i].GetData(), brand) && \
+						!strcmp(reinterpret_cast<string_t *>(part_container.GetData())[i].GetData(), container))
+						btv_res |= *cubit_partkey->bitmaps[part_key_data[i]]->btv;
+				}
+			}
+		}
+	}
+
+	vector<row_t> *row_ids = new vector<row_t>;
+
+	GetRowids(btv_res, row_ids);
+
+	std::unordered_map<int64_t, std::pair<int64_t, int32_t> > partkey_quantity_map;
+	std::unordered_map<int64_t, double> avg_quantity_map;
+	{
+		auto &lineitem_transaction = DuckTransaction::Get(context.client, lineitem_table.catalog);
+		TableScanState lineitem_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(1));
+		storage_column_ids.push_back(uint64_t(4));
+		lineitem_table.GetStorage().InitializeScan(lineitem_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[1]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[4]);
+
+		size_t cursor = 0;
+
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+
+			if(cursor < row_ids->size()) {
+				ColumnFetchState column_fetch_state;
+				data_ptr_t row_ids_data = nullptr;
+				row_ids_data = (data_ptr_t)&((*row_ids)[cursor]);
+				Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+				idx_t fetch_count = 2048;
+				if(cursor + fetch_count > row_ids->size()) {
+					fetch_count = row_ids->size() - cursor;
+				}
+				lineitem_table.GetStorage().Fetch(lineitem_transaction, result, storage_column_ids, row_ids_vec, fetch_count,
+														column_fetch_state);
+
+				cursor += fetch_count;
+			}
+			else {
+				break;
+			}
+
+			auto &part_key = result.data[0];
+			auto &quantity = result.data[1];
+			auto part_key_data = FlatVector::GetData<int64_t>(part_key);
+			auto quantity_data = FlatVector::GetData<int64_t>(quantity);
+
+			for(int i = 0; i < result.size(); i++) {
+				auto &it = partkey_quantity_map[part_key_data[i]];
+				it.first += quantity_data[i];
+				it.second++;
+			}
+		}
+
+		for(auto it = partkey_quantity_map.begin(); it != partkey_quantity_map.end(); it++) {
+			avg_quantity_map[it->first] = 0.2 * ((double)it->second.first / it->second.second);
+		}
+
+	}
+
+	int64_t sum_extendedprice = 0;
+	{
+		auto &lineitem_transaction = DuckTransaction::Get(context.client, lineitem_table.catalog);
+		TableScanState lineitem_scan_state;
+		TableScanGlobalSourceState gs(context.client, *this);
+		vector<storage_t> storage_column_ids;
+		storage_column_ids.push_back(uint64_t(1));
+		storage_column_ids.push_back(uint64_t(4));
+		storage_column_ids.push_back(uint64_t(5));
+		lineitem_table.GetStorage().InitializeScan(lineitem_scan_state, storage_column_ids);
+		vector<LogicalType> types;
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[1]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[4]);
+		types.push_back(lineitem_table.GetColumns().GetColumnTypes()[5]);
+
+		size_t cursor = 0;
+
+		while(true) {
+			DataChunk result;
+			result.Initialize(context.client, types);
+
+			if(cursor < row_ids->size()) {
+				ColumnFetchState column_fetch_state;
+				data_ptr_t row_ids_data = nullptr;
+				row_ids_data = (data_ptr_t)&((*row_ids)[cursor]);
+				Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+				idx_t fetch_count = 2048;
+				if(cursor + fetch_count > row_ids->size()) {
+					fetch_count = row_ids->size() - cursor;
+				}
+				lineitem_table.GetStorage().Fetch(lineitem_transaction, result, storage_column_ids, row_ids_vec, fetch_count,
+														column_fetch_state);
+
+				cursor += fetch_count;
+			}
+			else {
+				break;
+			}
+
+			auto &part_key = result.data[0];
+			auto &quantity = result.data[1];
+			auto &extendedprice = result.data[2];
+			auto part_key_data = FlatVector::GetData<int64_t>(part_key);
+			auto quantity_data = FlatVector::GetData<int64_t>(quantity);
+			auto extendedprice_data = FlatVector::GetData<int64_t>(extendedprice);
+
+			for(int i = 0; i < result.size(); i++) {
+				if((double)quantity_data[i] < avg_quantity_map[part_key_data[i]])
+					sum_extendedprice += extendedprice_data[i];
+			}
+		}
+	}
+
+	delete row_ids;
+	auto e0 = std::chrono::high_resolution_clock::now();
+
+	std::cout << "sum : " << sum_extendedprice << std::endl;
+	sum_extendedprice /= 100;
+	double q17_ans = sum_extendedprice / 7.0;
+	std::cout << "avg : " << std::setprecision(16) << q17_ans << std::endl;
+	std::cout << "q17 time : " << std::chrono::duration_cast<std::chrono::milliseconds>(e0 - s0).count() << "ms" << std::endl;
+	
+
+}
+
+void PhysicalTableScan::TPCH_Q18_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const {
+	auto cubit_orderkey = dynamic_cast<cubit::Cubit *>(context.client.bitmap_orderkey);
+
+	ibis::bitvector btv_res;
+	btv_res.adjustSize(0, cubit_orderkey->config->n_rows);
+	btv_res.decompress();
+
+	for(auto orderkey : context.client.q18_orderkey) {
+		btv_res |= *cubit_orderkey->bitmaps[orderkey]->btv;
+	}
+
+	GetRowids(btv_res, row_ids);
+}
+
+void PhysicalTableScan::TPCH_Q18_Orders_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const {
+	auto cubit_orderkey = dynamic_cast<cubit::Cubit *>(context.client.bitmap_o_orderkey);
+
+	ibis::bitvector btv_res;
+	btv_res.adjustSize(0, cubit_orderkey->config->n_rows);
+	btv_res.decompress();
+
+	for(auto orderkey : context.client.q18_orderkey) {
+		btv_res |= *cubit_orderkey->bitmaps[orderkey]->btv;
+	}
+
+	GetRowids(btv_res, row_ids);
+}
+
+void PhysicalTableScan::TPCH_Q19_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const {
+	auto cubit_shipmode = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipmode);
+	auto cubit_shipinstruct = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipinstruct);
+
+	std::unordered_map<std::string, int> modeti;
+	modeti["REG AIR"] = 0;
+	modeti["AIR"] = 1;
+	modeti["RAIL"] = 2;
+	modeti["SHIP"] = 3;
+	modeti["TRUCK"] = 4;
+	modeti["MAIL"] = 5;
+	modeti["FOB"] = 6;
+
+	std::unordered_map<std::string, int> instructti;
+	instructti["DELIVER IN PERSON"] = 0;
+	instructti["COLLECT COD"] = 1;
+	instructti["NONE"] = 2;
+	instructti["TAKE BACK RETURN"] = 3;
+
+	ibis::bitvector btv_res;
+	btv_res.copy(*cubit_shipmode->bitmaps[modeti["AIR"]]->btv);
+	btv_res.decompress();
+
+	btv_res &= *cubit_shipinstruct->bitmaps[instructti["DELIVER IN PERSON"]]->btv;
+
+	GetRowids(btv_res, row_ids);
+}
+
 SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk &chunk,
                                             OperatorSourceInput &input) const {
-	auto s1 = std::chrono::high_resolution_clock::now();
-	TPCH_Q1(context);
-	auto e1 = std::chrono::high_resolution_clock::now();
-	std::cout << "q5 time : " << std::chrono::duration_cast<std::chrono::milliseconds>(e1 - s1).count() << "ms" << std::endl;
+	// TPCH_Q5(context);
 
 	D_ASSERT(!column_ids.empty());
 	auto &gstate = input.global_state.Cast<TableScanGlobalSourceState>();
 	auto &state = input.local_state.Cast<TableScanLocalSourceState>();
 
-	if(context.client.GetCurrentQuery() == "SELECT\n    sum(l_extendedprice * l_discount) AS revenue\nFROM\n    lineitem\nWHERE\n    l_shipdate >= CAST('1994-01-01' AS date)\n    AND l_shipdate < CAST('1995-01-01' AS date)\n    AND l_discount BETWEEN 0.05\n    AND 0.07\n    AND l_quantity < 24;\n") {
+	if(context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q06) {
 		if(*cursor == 0) {
 			TPCH_Q6_Lineitem_GetRowIds(context, row_ids);
 		}
@@ -1089,9 +2200,6 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 
 			vector<storage_t> storage_column_ids;
 
-			// Define the two columns (by specifying their ids) to be probed.
-			// Note that for Q6, we only probe two columns, rather than 4 in Scan.
-			// storage_column_ids.push_back(uint64_t(4));	// For l_quantity
 			storage_column_ids.push_back(uint64_t(6));	// For l_discount
 			storage_column_ids.push_back(uint64_t(5));	// For l_extendedprice
 
@@ -1122,287 +2230,418 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		}
 	}
 
+	if( bind_data.get()->Cast<TableScanBindData>().table.name == "orders" && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q12) {
+		if(*cursor == 0) {
+			TPCH_Q12_Orders_GetRowIds(context, row_ids);
+			context.client.q12_orderkey.clear();
+		}
+		
+		if(*cursor < row_ids->size()) {
+
+			vector<storage_t> storage_column_ids;
+
+			storage_column_ids.push_back(uint64_t(0));	// For o_orderkey
+			storage_column_ids.push_back(uint64_t(5));	// For o_orderpriority
+
+			TableScanState local_storage_state;
+			local_storage_state.Initialize(storage_column_ids, table_filters.get());
+			ColumnFetchState column_fetch_state;
+
+			auto &table_bind_data = bind_data.get()->Cast<TableScanBindData>();
+			auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
+
+			data_ptr_t row_ids_data = nullptr;
+			row_ids_data = (data_ptr_t)&((*row_ids)[*cursor]);
+			Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+			idx_t fetch_count = 2048;
+			if(*cursor + fetch_count > row_ids->size()) {
+				fetch_count = row_ids->size() - *cursor;
+			}
+
+			table_bind_data.table.GetStorage().Fetch(transaction, chunk, storage_column_ids, row_ids_vec, fetch_count,
+													column_fetch_state);
+			*cursor += fetch_count;
+			return SourceResultType::HAVE_MORE_OUTPUT;
+		}
+		else {
+			delete row_ids;
+			delete cursor;
+			return SourceResultType::FINISHED;
+		}
+	}
+
+	if( bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem" && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q14) {
+		if(*cursor == 0) {
+			TPCH_Q14_Lineitem_GetRowIds(context, row_ids);
+		}
+		
+		if(*cursor < row_ids->size()) {
+
+			vector<storage_t> storage_column_ids;
+
+			storage_column_ids.push_back(uint64_t(1));	// For l_partkey
+			storage_column_ids.push_back(uint64_t(5));	// For l_extendedprice
+			storage_column_ids.push_back(uint64_t(6));	// For l_discount
+
+			TableScanState local_storage_state;
+			local_storage_state.Initialize(storage_column_ids, table_filters.get());
+			ColumnFetchState column_fetch_state;
+
+			auto &table_bind_data = bind_data.get()->Cast<TableScanBindData>();
+			auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
+
+			data_ptr_t row_ids_data = nullptr;
+			row_ids_data = (data_ptr_t)&((*row_ids)[*cursor]);
+			Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+			idx_t fetch_count = 2048;
+			if(*cursor + fetch_count > row_ids->size()) {
+				fetch_count = row_ids->size() - *cursor;
+			}
+
+			table_bind_data.table.GetStorage().Fetch(transaction, chunk, storage_column_ids, row_ids_vec, fetch_count,
+													column_fetch_state);
+			*cursor += fetch_count;
+			return SourceResultType::HAVE_MORE_OUTPUT;
+		}
+		else {
+			delete row_ids;
+			delete cursor;
+			return SourceResultType::FINISHED;
+		}
+	}
+
+	if( bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem" && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q15) {
+		if(*cursor == 0) {
+			TPCH_Q15_Lineitem_GetRowIds(context, row_ids);
+		}
+		
+		if(*cursor < row_ids->size()) {
+
+			vector<storage_t> storage_column_ids;
+
+			storage_column_ids.push_back(uint64_t(2));	// For l_suppkey
+			storage_column_ids.push_back(uint64_t(5));	// For l_extendedprice
+			storage_column_ids.push_back(uint64_t(6));	// For l_discount
+
+			TableScanState local_storage_state;
+			local_storage_state.Initialize(storage_column_ids, table_filters.get());
+			ColumnFetchState column_fetch_state;
+
+			auto &table_bind_data = bind_data.get()->Cast<TableScanBindData>();
+			auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
+
+			data_ptr_t row_ids_data = nullptr;
+			row_ids_data = (data_ptr_t)&((*row_ids)[*cursor]);
+			Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+			idx_t fetch_count = 2048;
+			if(*cursor + fetch_count > row_ids->size()) {
+				fetch_count = row_ids->size() - *cursor;
+			}
+
+			table_bind_data.table.GetStorage().Fetch(transaction, chunk, storage_column_ids, row_ids_vec, fetch_count,
+													column_fetch_state);
+			*cursor += fetch_count;
+			return SourceResultType::HAVE_MORE_OUTPUT;
+		}
+		else {
+			delete row_ids;
+			delete cursor;
+			return SourceResultType::FINISHED;
+		}
+	}
+
+	if(context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q18 && context.client.q18_orderkey.size() != 0) {
+		if( bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem" ) {
+			if(*cursor == 0) {
+				TPCH_Q18_Lineitem_GetRowIds(context, row_ids);
+			}
+			
+			if(*cursor < row_ids->size()) {
+
+				vector<storage_t> storage_column_ids;
+
+				storage_column_ids.push_back(uint64_t(0));	// For l_orderkey
+				storage_column_ids.push_back(uint64_t(4));	// For l_quantity
+
+				TableScanState local_storage_state;
+				local_storage_state.Initialize(storage_column_ids, table_filters.get());
+				ColumnFetchState column_fetch_state;
+
+				auto &table_bind_data = bind_data.get()->Cast<TableScanBindData>();
+				auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
+
+				data_ptr_t row_ids_data = nullptr;
+				row_ids_data = (data_ptr_t)&((*row_ids)[*cursor]);
+				Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+				idx_t fetch_count = 2048;
+				if(*cursor + fetch_count > row_ids->size()) {
+					fetch_count = row_ids->size() - *cursor;
+				}
+
+				table_bind_data.table.GetStorage().Fetch(transaction, chunk, storage_column_ids, row_ids_vec, fetch_count,
+														column_fetch_state);
+				*cursor += fetch_count;
+				return SourceResultType::HAVE_MORE_OUTPUT;
+			}
+			else {
+				delete row_ids;
+				delete cursor;
+				context.client.q18_orderkey.resize(0);
+				return SourceResultType::FINISHED;
+			}
+		}
+
+		if( bind_data.get()->Cast<TableScanBindData>().table.name == "orders" ) {
+			if(*cursor == 0) {
+				TPCH_Q18_Orders_GetRowIds(context, row_ids);
+			}
+			
+			if(*cursor < row_ids->size()) {
+
+				vector<storage_t> storage_column_ids;
+
+				storage_column_ids.push_back(uint64_t(0));	// For o_orderkey
+				storage_column_ids.push_back(uint64_t(1));	// For o_custkey
+				storage_column_ids.push_back(uint64_t(4));	// For o_orderdate
+				storage_column_ids.push_back(uint64_t(3));	// For o_totalprice
+
+
+				TableScanState local_storage_state;
+				local_storage_state.Initialize(storage_column_ids, table_filters.get());
+				ColumnFetchState column_fetch_state;
+
+				auto &table_bind_data = bind_data.get()->Cast<TableScanBindData>();
+				auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
+
+				data_ptr_t row_ids_data = nullptr;
+				row_ids_data = (data_ptr_t)&((*row_ids)[*cursor]);
+				Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+				idx_t fetch_count = 2048;
+				if(*cursor + fetch_count > row_ids->size()) {
+					fetch_count = row_ids->size() - *cursor;
+				}
+
+				table_bind_data.table.GetStorage().Fetch(transaction, chunk, storage_column_ids, row_ids_vec, fetch_count,
+														column_fetch_state);
+				*cursor += fetch_count;
+				return SourceResultType::HAVE_MORE_OUTPUT;
+			}
+			else {
+				delete row_ids;
+				delete cursor;
+				return SourceResultType::FINISHED;
+			}
+		}
+	}
+
+	if( bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem" && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q19) {
+		if(*cursor == 0) {
+			TPCH_Q19_Lineitem_GetRowIds(context, row_ids);
+		}
+		
+		if(*cursor < row_ids->size()) {
+
+			vector<storage_t> storage_column_ids;
+
+			storage_column_ids.push_back(uint64_t(1));	// For l_partkey
+			storage_column_ids.push_back(uint64_t(4));	// For l_quantity
+			storage_column_ids.push_back(uint64_t(14));	// For l_shipmode
+			storage_column_ids.push_back(uint64_t(5));	// For l_extendedprice
+			storage_column_ids.push_back(uint64_t(6));	// For l_discount
+
+			TableScanState local_storage_state;
+			local_storage_state.Initialize(storage_column_ids, table_filters.get());
+			ColumnFetchState column_fetch_state;
+
+			auto &table_bind_data = bind_data.get()->Cast<TableScanBindData>();
+			auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
+
+			data_ptr_t row_ids_data = nullptr;
+			row_ids_data = (data_ptr_t)&((*row_ids)[*cursor]);
+			Vector row_ids_vec(LogicalType::ROW_TYPE, row_ids_data);
+			idx_t fetch_count = 2048;
+			if(*cursor + fetch_count > row_ids->size()) {
+				fetch_count = row_ids->size() - *cursor;
+			}
+
+			table_bind_data.table.GetStorage().Fetch(transaction, chunk, storage_column_ids, row_ids_vec, fetch_count,
+													column_fetch_state);
+			*cursor += fetch_count;
+			return SourceResultType::HAVE_MORE_OUTPUT;
+		}
+		else {
+			delete row_ids;
+			delete cursor;
+			return SourceResultType::FINISHED;
+		}
+	}
+
+
 	TableFunctionInput data(bind_data.get(), state.local_state.get(), gstate.global_state.get());
 	function.function(context.client, data, chunk);
 
 	return chunk.size() == 0 ? SourceResultType::FINISHED : SourceResultType::HAVE_MORE_OUTPUT;
+	/*
+	We run 10 trials for CUBIT-powered DuckDB on TPC-H Q6.
+	The first two trials are to warm up. We report the mean value of the following trials. 
+	We use a similar strategy in reporting the performance of DuckDB's original Scan.
+	for (int times = 0; times < 10; times++) {
 
-	// We run 10 trials for CUBIT-powered DuckDB on TPC-H Q6.
-	// The first two trials are to warm up. We report the mean value of the following trials. 
-	// We use a similar strategy in reporting the performance of DuckDB's original Scan.
-	// for (int times = 0; times < 10; times++) {
+		auto start = std::chrono::high_resolution_clock::now();
 
-	// 	auto start = std::chrono::high_resolution_clock::now();
+		D_ASSERT(!column_ids.empty());
+		auto &gstate = input.global_state.Cast<TableScanGlobalSourceState>();
+		auto &state = input.local_state.Cast<TableScanLocalSourceState>();
 
-	// 	D_ASSERT(!column_ids.empty());
-	// 	auto &gstate = input.global_state.Cast<TableScanGlobalSourceState>();
-	// 	auto &state = input.local_state.Cast<TableScanLocalSourceState>();
+		auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
+		auto cubit_discount = dynamic_cast<cubit::Cubit *>(context.client.bitmap_discount);
+		auto cubit_quantity = dynamic_cast<cubit::Cubit *>(context.client.bitmap_quantity);
 
-	// 	auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
-	// 	auto cubit_discount = dynamic_cast<cubit::Cubit *>(context.client.bitmap_discount);
-	// 	auto cubit_quantity = dynamic_cast<cubit::Cubit *>(context.client.bitmap_quantity);
+		int lower_year;
+		int upper_year;
 
-	// 	int lower_year;
-	// 	int upper_year;
+		int lower_discount;
+		int upper_discount;
 
-	// 	int lower_discount;
-	// 	int upper_discount;
+		int upper_quantity = 24;
 
-	// 	int upper_quantity = 24;
+		// Interpret the input Q6 predicate.
+		for (auto &f : table_filters->filters) {
+			auto &column_index = f.first;
+			auto &filter = f.second;
 
-	// 	// Interpret the input Q6 predicate.
-	// 	for (auto &f : table_filters->filters) {
-	// 		auto &column_index = f.first;
-	// 		auto &filter = f.second;
+			switch (filter->filter_type) {
+			case TableFilterType::CONJUNCTION_AND: {
+				auto &conj_filter = filter->Cast<ConjunctionAndFilter>();
+				if (column_index < names.size()) {
+					const std::string &column_name = names[column_ids[column_index]];
 
-	// 		switch (filter->filter_type) {
-	// 		case TableFilterType::CONJUNCTION_AND: {
-	// 			auto &conj_filter = filter->Cast<ConjunctionAndFilter>();
-	// 			if (column_index < names.size()) {
-	// 				const std::string &column_name = names[column_ids[column_index]];
-
-	// 				if (column_name == "l_shipdate") {
-	// 					for (auto &child_filter : conj_filter.child_filters) {
-	// 						switch (child_filter->filter_type) {
-	// 						case TableFilterType::CONSTANT_COMPARISON: {
-	// 							auto &constant_comp_filter = child_filter->Cast<ConstantFilter>();
-	// 							if (constant_comp_filter.constant.type().id() == LogicalTypeId::DATE) {
-	// 								D_ASSERT(constant_comp_filter.constant.type().InternalType() ==
-	// 								         PhysicalType::INT32);
-	// 								D_ASSERT(column_name == "l_shipdate");
-	// 								auto days = constant_comp_filter.constant.GetValueUnsafe<int32_t>();
-	// 								date_t date(days);
-	// 								auto year = Date::ExtractYear(date);
-	// 								switch (constant_comp_filter.comparison_type) {
-	// 								case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-	// 									lower_year = year - 1992;
-	// 									break;
-	// 								case ExpressionType::COMPARE_LESSTHAN:
-	// 									upper_year = year - 1992;
-	// 									break;
-	// 								default:
-	// 									throw InternalException("Invalid comparison in TPCH-Q6");
-	// 								}
-	// 							}
-	// 							break;
-	// 						}
-	// 						default:
-	// 							break;
-	// 						}
-	// 					}
-	// 				} else if (column_name == "l_discount") {
-	// 					auto null_par = CastParameters();
-	// 					for (auto &child_filter : conj_filter.child_filters) {
-	// 						switch (child_filter->filter_type) {
-	// 						case TableFilterType::CONSTANT_COMPARISON: {
-	// 							auto &constant_comp_filter = child_filter->Cast<ConstantFilter>();
-	// 							if (constant_comp_filter.constant.type().id() == LogicalTypeId::DECIMAL) {
-	// 								double discount;
-	// 								switch (constant_comp_filter.constant.type().InternalType()) {
-	// 								case PhysicalType::INT16: {
-	// 									int16_t value16 = constant_comp_filter.constant.GetValueUnsafe<int16_t>();
-	// 									TryCastFromDecimal::Operation(value16, discount, null_par, 15, 2);
-	// 									break;
-	// 								}
-	// 								case PhysicalType::INT32: {
-	// 									int32_t value32 = constant_comp_filter.constant.GetValueUnsafe<int32_t>();
-	// 									TryCastFromDecimal::Operation(value32, discount, null_par, 15, 2);
-	// 									break;
-	// 								}
-	// 								case PhysicalType::INT64: {
-	// 									int64_t value64 = constant_comp_filter.constant.GetValueUnsafe<int64_t>();
-	// 									TryCastFromDecimal::Operation(value64, discount, null_par, 15, 2);
-	// 									break;
-	// 								}
-	// 								default:
-	// 									throw InternalException("Unsupported physical type for decimal");
-	// 								}
-	// 								switch (constant_comp_filter.comparison_type) {
-	// 								case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-	// 									lower_discount = static_cast<int>(discount * 100);
-	// 									break;
-	// 								case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-	// 									upper_discount = static_cast<int>(discount * 100);
-	// 									break;
-	// 								default:
-	// 									throw InternalException("Invalid comparison in TPCH-Q6");
-	// 								}
-	// 							}
-	// 							break;
-	// 						}
-	// 						default:
-	// 							break;
-	// 						}
-	// 					}
-	// 				}
-	// 			}
-	// 			break;
-	// 		}
-	// 		default:
-	// 			throw InternalException("unspported filter type");
-	// 		}
-	// 	}
-
-	// 	uint64_t n_seg = cubit_shipdate->bitmaps[0]->seg_btv->seg_table.size();
-	// 	uint64_t n_threads = 1;
-	// 	uint64_t n_seg_per_thread = n_seg / n_threads;
-	// 	uint64_t n_left = n_seg % n_threads;
-
-	// 	std::thread *threads = new std::thread[n_threads];
-	// 	std::vector<vector<row_t>> thread_row_ids(n_threads);
-	// 	std::vector<uint64_t> begin(n_threads + 1, 0);
-	// 	std::vector<double> local_revenues(n_threads, 0.0);
-	// 	for (uint64_t i = 1; i <= n_left; i++) {
-	// 		begin[i] = begin[i - 1] + n_seg_per_thread + 1;
-	// 	}
-	// 	for (uint64_t i = n_left + 1; i <= n_threads; i++) {
-	// 		begin[i] = begin[i - 1] + n_seg_per_thread;
-	// 	}
-
-	// 	// Assign the workload of each query to n_threads background threads,
-	// 	// each of which performs the workload of the parallel executor for TPC-H Q6.
-	// 	// We control the parallelism by hand, rather than relying on the parallel executor 
-	// 	// for better (hardware characteristics) measurement and performance tuning.
-	// 	auto &table_bind_data = bind_data->Cast<TableScanBindData>();
-	// 	auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
-	// 	auto logical_types = GetTypes();
-	// 	for (uint64_t i = 0; i < n_threads; i++) {
-	// 		threads[i] = std::thread(&IndexRead, &thread_row_ids[i], begin[i], begin[i + 1], cubit_shipdate,
-	// 		                         cubit_discount, cubit_quantity, lower_year, upper_year, lower_discount,
-	// 		                         upper_discount, upper_quantity, &transaction, &context.client, &local_revenues[i],
-	// 		                         bind_data.get(), table_filters.get(), &chunk, &logical_types);
-	// 	}
-	// 	for (uint64_t i = 0; i < n_threads; i++) {
-	// 		threads[i].join();
-	// 	}
-	// 	double revenues = std::accumulate(local_revenues.begin(), local_revenues.end(), 0.0);
-
-	// 	auto end = std::chrono::high_resolution_clock::now();
-	// 	int64_t time_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-	// 	std::cout << "revenues: " << std::fixed << revenues << std::endl;
-	// 	std::cout << "time consumption: " << time_elapsed_us << "us" << std::endl;
-	// 	std::cout << "------------------------" << std::endl;
-	// }
-
-	std::exit(0);
-	return chunk.size() == 0 ? SourceResultType::FINISHED : SourceResultType::HAVE_MORE_OUTPUT;
-}
-
-void PhysicalTableScan::TPCH_Q6_Lineitem_GetRowIds(ExecutionContext &context, vector<row_t> *row_ids) const {
-	auto cubit_shipdate = dynamic_cast<cubit::Cubit *>(context.client.bitmap_shipdate);
-	auto cubit_discount = dynamic_cast<cubit::Cubit *>(context.client.bitmap_discount);
-	auto cubit_quantity = dynamic_cast<cubit::Cubit *>(context.client.bitmap_quantity);
-
-	int lower_year;
-	int upper_year;
-
-	int lower_discount;
-	int upper_discount;
-
-	int upper_quantity = 24;
-
-	// Interpret the input Q6 predicate.
-	for (auto &f : table_filters->filters) {
-		auto &column_index = f.first;
-		auto &filter = f.second;
-
-		switch (filter->filter_type) {
-		case TableFilterType::CONJUNCTION_AND: {
-			auto &conj_filter = filter->Cast<ConjunctionAndFilter>();
-			if (column_index < names.size()) {
-				const std::string &column_name = names[column_ids[column_index]];
-
-				if (column_name == "l_shipdate") {
-					for (auto &child_filter : conj_filter.child_filters) {
-						switch (child_filter->filter_type) {
-						case TableFilterType::CONSTANT_COMPARISON: {
-							auto &constant_comp_filter = child_filter->Cast<ConstantFilter>();
-							if (constant_comp_filter.constant.type().id() == LogicalTypeId::DATE) {
-								D_ASSERT(constant_comp_filter.constant.type().InternalType() ==
-											PhysicalType::INT32);
-								D_ASSERT(column_name == "l_shipdate");
-								auto days = constant_comp_filter.constant.GetValueUnsafe<int32_t>();
-								date_t date(days);
-								auto year = Date::ExtractYear(date);
-								switch (constant_comp_filter.comparison_type) {
-								case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-									lower_year = year - 1992;
-									break;
-								case ExpressionType::COMPARE_LESSTHAN:
-									upper_year = year - 1992;
-									break;
-								default:
-									throw InternalException("Invalid comparison in TPCH-Q6");
+					if (column_name == "l_shipdate") {
+						for (auto &child_filter : conj_filter.child_filters) {
+							switch (child_filter->filter_type) {
+							case TableFilterType::CONSTANT_COMPARISON: {
+								auto &constant_comp_filter = child_filter->Cast<ConstantFilter>();
+								if (constant_comp_filter.constant.type().id() == LogicalTypeId::DATE) {
+									D_ASSERT(constant_comp_filter.constant.type().InternalType() ==
+									         PhysicalType::INT32);
+									D_ASSERT(column_name == "l_shipdate");
+									auto days = constant_comp_filter.constant.GetValueUnsafe<int32_t>();
+									date_t date(days);
+									auto year = Date::ExtractYear(date);
+									switch (constant_comp_filter.comparison_type) {
+									case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+										lower_year = year - 1992;
+										break;
+									case ExpressionType::COMPARE_LESSTHAN:
+										upper_year = year - 1992;
+										break;
+									default:
+										throw InternalException("Invalid comparison in TPCH-Q6");
+									}
 								}
+								break;
 							}
-							break;
-						}
-						default:
-							break;
-						}
-					}
-				} else if (column_name == "l_discount") {
-					auto null_par = CastParameters();
-					for (auto &child_filter : conj_filter.child_filters) {
-						switch (child_filter->filter_type) {
-						case TableFilterType::CONSTANT_COMPARISON: {
-							auto &constant_comp_filter = child_filter->Cast<ConstantFilter>();
-							if (constant_comp_filter.constant.type().id() == LogicalTypeId::DECIMAL) {
-								double discount;
-								switch (constant_comp_filter.constant.type().InternalType()) {
-								case PhysicalType::INT16: {
-									int16_t value16 = constant_comp_filter.constant.GetValueUnsafe<int16_t>();
-									TryCastFromDecimal::Operation(value16, discount, null_par, 15, 2);
-									break;
-								}
-								case PhysicalType::INT32: {
-									int32_t value32 = constant_comp_filter.constant.GetValueUnsafe<int32_t>();
-									TryCastFromDecimal::Operation(value32, discount, null_par, 15, 2);
-									break;
-								}
-								case PhysicalType::INT64: {
-									int64_t value64 = constant_comp_filter.constant.GetValueUnsafe<int64_t>();
-									TryCastFromDecimal::Operation(value64, discount, null_par, 15, 2);
-									break;
-								}
-								default:
-									throw InternalException("Unsupported physical type for decimal");
-								}
-								switch (constant_comp_filter.comparison_type) {
-								case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
-									lower_discount = static_cast<int>(discount * 100);
-									break;
-								case ExpressionType::COMPARE_LESSTHANOREQUALTO:
-									upper_discount = static_cast<int>(discount * 100);
-									break;
-								default:
-									throw InternalException("Invalid comparison in TPCH-Q6");
-								}
+							default:
+								break;
 							}
-							break;
 						}
-						default:
-							break;
+					} else if (column_name == "l_discount") {
+						auto null_par = CastParameters();
+						for (auto &child_filter : conj_filter.child_filters) {
+							switch (child_filter->filter_type) {
+							case TableFilterType::CONSTANT_COMPARISON: {
+								auto &constant_comp_filter = child_filter->Cast<ConstantFilter>();
+								if (constant_comp_filter.constant.type().id() == LogicalTypeId::DECIMAL) {
+									double discount;
+									switch (constant_comp_filter.constant.type().InternalType()) {
+									case PhysicalType::INT16: {
+										int16_t value16 = constant_comp_filter.constant.GetValueUnsafe<int16_t>();
+										TryCastFromDecimal::Operation(value16, discount, null_par, 15, 2);
+										break;
+									}
+									case PhysicalType::INT32: {
+										int32_t value32 = constant_comp_filter.constant.GetValueUnsafe<int32_t>();
+										TryCastFromDecimal::Operation(value32, discount, null_par, 15, 2);
+										break;
+									}
+									case PhysicalType::INT64: {
+										int64_t value64 = constant_comp_filter.constant.GetValueUnsafe<int64_t>();
+										TryCastFromDecimal::Operation(value64, discount, null_par, 15, 2);
+										break;
+									}
+									default:
+										throw InternalException("Unsupported physical type for decimal");
+									}
+									switch (constant_comp_filter.comparison_type) {
+									case ExpressionType::COMPARE_GREATERTHANOREQUALTO:
+										lower_discount = static_cast<int>(discount * 100);
+										break;
+									case ExpressionType::COMPARE_LESSTHANOREQUALTO:
+										upper_discount = static_cast<int>(discount * 100);
+										break;
+									default:
+										throw InternalException("Invalid comparison in TPCH-Q6");
+									}
+								}
+								break;
+							}
+							default:
+								break;
+							}
 						}
 					}
 				}
+				break;
 			}
-			break;
+			default:
+				throw InternalException("unspported filter type");
+			}
 		}
-		default:
-			throw InternalException("unspported filter type");
+
+		uint64_t n_seg = cubit_shipdate->bitmaps[0]->seg_btv->seg_table.size();
+		uint64_t n_threads = 1;
+		uint64_t n_seg_per_thread = n_seg / n_threads;
+		uint64_t n_left = n_seg % n_threads;
+
+		std::thread *threads = new std::thread[n_threads];
+		std::vector<vector<row_t>> thread_row_ids(n_threads);
+		std::vector<uint64_t> begin(n_threads + 1, 0);
+		std::vector<double> local_revenues(n_threads, 0.0);
+		for (uint64_t i = 1; i <= n_left; i++) {
+			begin[i] = begin[i - 1] + n_seg_per_thread + 1;
 		}
+		for (uint64_t i = n_left + 1; i <= n_threads; i++) {
+			begin[i] = begin[i - 1] + n_seg_per_thread;
+		}
+
+		// Assign the workload of each query to n_threads background threads,
+		// each of which performs the workload of the parallel executor for TPC-H Q6.
+		// We control the parallelism by hand, rather than relying on the parallel executor 
+		// for better (hardware characteristics) measurement and performance tuning.
+		auto &table_bind_data = bind_data->Cast<TableScanBindData>();
+		auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
+		auto logical_types = GetTypes();
+		for (uint64_t i = 0; i < n_threads; i++) {
+			threads[i] = std::thread(&IndexRead, &thread_row_ids[i], begin[i], begin[i + 1], cubit_shipdate,
+			                         cubit_discount, cubit_quantity, lower_year, upper_year, lower_discount,
+			                         upper_discount, upper_quantity, &transaction, &context.client, &local_revenues[i],
+			                         bind_data.get(), table_filters.get(), &chunk, &logical_types);
+		}
+		for (uint64_t i = 0; i < n_threads; i++) {
+			threads[i].join();
+		}
+		double revenues = std::accumulate(local_revenues.begin(), local_revenues.end(), 0.0);
+
+		auto end = std::chrono::high_resolution_clock::now();
+		int64_t time_elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+		std::cout << "revenues: " << std::fixed << revenues << std::endl;
+		std::cout << "time consumption: " << time_elapsed_us << "us" << std::endl;
+		std::cout << "------------------------" << std::endl;
 	}
 
-	uint64_t n_seg = cubit_shipdate->bitmaps[0]->seg_btv->seg_table.size();
-
-	auto &table_bind_data = bind_data->Cast<TableScanBindData>();
-	auto &transaction = DuckTransaction::Get(context.client, table_bind_data.table.catalog);
-	auto logical_types = GetTypes();
-
-	IndexRead_nofetch(row_ids, 0, n_seg, cubit_shipdate, cubit_discount, cubit_quantity, lower_year, upper_year,\
-						lower_discount, upper_discount, upper_quantity);
-	std::cout << row_ids->size() << std::endl;
+	std::exit(0);
+	return chunk.size() == 0 ? SourceResultType::FINISHED : SourceResultType::HAVE_MORE_OUTPUT;
+	*/
 }
 
 
@@ -1454,14 +2693,13 @@ static int kill_perf_process(int perf_pid) {
 
 void or_op(ibis::bitvector *res, ibis::bitvector *rhs)
 {
-
 	// assume res.size() == rhs.size()
 	// assume both uncompress
 	size_t mvec_size = res->m_vec.size();
 	size_t i = 0;
 	// __m512i a,b,c;
-    ibis::array_t<ibis::bitvector::word_t>::iterator i0 = res->m_vec.begin();
-    ibis::array_t<ibis::bitvector::word_t>::const_iterator i1 = rhs->m_vec.begin();
+	ibis::array_t<ibis::bitvector::word_t>::iterator i0 = res->m_vec.begin();
+	ibis::array_t<ibis::bitvector::word_t>::const_iterator i1 = rhs->m_vec.begin();
 	ibis::array_t<ibis::bitvector::word_t>::iterator iend = res->m_vec.begin() + (res->m_vec.size() / 16) * 16;
 	__m512i *srcp = (__m512i *)i0;
 	__m512i *dstp = (__m512i *)i1;
@@ -1472,14 +2710,6 @@ void or_op(ibis::bitvector *res, ibis::bitvector *rhs)
 		const __m512i c = _mm512_or_epi32(a, b);
 		_mm512_storeu_si512(srcp++, c);
 	}
-
-	// while(i0 != res->m_vec.end()) {
-	// 	*i0 |= *i1;
-	// 	i0++;
-	// 	i1++;
-	// }
-
-	// res->active.val |= rhs->active.val;
 }
 
 // TPC-H Q6	
