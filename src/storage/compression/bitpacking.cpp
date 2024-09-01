@@ -16,6 +16,7 @@
 #include "duckdb/storage/table/scan_state.hpp"
 
 #include <functional>
+#include <immintrin.h>
 
 namespace duckdb {
 
@@ -772,6 +773,7 @@ unique_ptr<SegmentScanState> BitpackingInitScan(ColumnSegment &segment) {
 //===--------------------------------------------------------------------===//
 // Scan base data
 //===--------------------------------------------------------------------===//
+/*
 template <class T, class T_S = typename MakeSigned<T>::type, class T_U = typename MakeUnsigned<T>::type>
 void BitpackingScanPartial(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result,
                            idx_t result_offset) {
@@ -862,6 +864,60 @@ void BitpackingScanPartial(ColumnSegment &segment, ColumnScanState &state, idx_t
 		scan_state.current_group_offset += to_scan;
 	}
 }
+*/
+
+template <class T, class T_S = typename MakeSigned<T>::type, class T_U = typename MakeUnsigned<T>::type>
+void BitpackingScanPartial(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result,
+                           idx_t result_offset) {
+
+	int quantity = 40;
+	auto &scan_state = state.scan_state->Cast<BitpackingScanState<T>>();
+
+	uint8_t *copymem = new uint8_t[scan_count];
+
+	memcpy(copymem, scan_state.current_group_ptr, scan_count);
+
+	T *result_data = FlatVector::GetData<T>(result);
+	result.SetVectorType(VectorType::FLAT_VECTOR);
+
+	//! Because FOR offsets all our values to be 0 or above, we can always skip sign extension here
+	bool skip_sign_extend = true;
+	if (scan_state.current_group_offset == BITPACKING_METADATA_GROUP_SIZE) {
+		scan_state.LoadNextGroup();
+	}
+	int scan_times= static_cast<int>(std::ceil(static_cast<double>(scan_count)/64));
+	__m512i threshold = _mm512_set1_epi8(quantity);
+	for(int i=0;i<scan_times;i++){
+		__m512i data = _mm512_loadu_si512(reinterpret_cast<const __m512i*>(copymem+i*64));
+		result_data[i] = _mm512_cmp_epu8_mask(data, threshold, _MM_CMPINT_LT);
+	}
+
+	idx_t scanned = 0;
+	while (scanned < scan_count) {
+		if (scan_state.current_group_offset == BITPACKING_METADATA_GROUP_SIZE) {
+			scan_state.LoadNextGroup();
+		}
+		idx_t offset_in_compression_group =
+		    scan_state.current_group_offset % BitpackingPrimitives::BITPACKING_ALGORITHM_GROUP_SIZE;
+		idx_t to_scan = MinValue<idx_t>(scan_count - scanned, BitpackingPrimitives::BITPACKING_ALGORITHM_GROUP_SIZE -
+																	offset_in_compression_group);
+		// Calculate start of compression algorithm group
+		data_ptr_t current_position_ptr =
+			scan_state.current_group_ptr + scan_state.current_group_offset * scan_state.current_width / 8;
+		data_ptr_t decompression_group_start_pointer =
+			current_position_ptr - offset_in_compression_group * scan_state.current_width / 8;
+
+		T *current_result_ptr = result_data + result_offset + scanned;
+		// Decompress directly into result vector
+		BitpackingPrimitives::UnPackBlock<T>(data_ptr_cast(current_result_ptr), decompression_group_start_pointer,
+												scan_state.current_width, skip_sign_extend);
+		scanned += to_scan;
+		scan_state.current_group_offset += to_scan;
+	}
+
+	delete copymem;
+}
+
 
 template <class T>
 void BitpackingScan(ColumnSegment &segment, ColumnScanState &state, idx_t scan_count, Vector &result) {
