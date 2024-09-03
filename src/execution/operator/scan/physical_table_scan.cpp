@@ -2230,7 +2230,7 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		}
 	}
 
-	if( bind_data.get()->Cast<TableScanBindData>().table.name == "orders" && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q12) {
+	if( context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q12 && bind_data.get()->Cast<TableScanBindData>().table.name == "orders") {
 		if(*cursor == 0) {
 			TPCH_Q12_Orders_GetRowIds(context, row_ids);
 			context.client.q12_orderkey.clear();
@@ -2270,7 +2270,7 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		}
 	}
 
-	if( bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem" && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q14) {
+	if( context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q14 && bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem") {
 		if(*cursor == 0) {
 			TPCH_Q14_Lineitem_GetRowIds(context, row_ids);
 		}
@@ -2310,7 +2310,7 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		}
 	}
 
-	if( bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem" && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q15) {
+	if( context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q15 && bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem") {
 		if(*cursor == 0) {
 			TPCH_Q15_Lineitem_GetRowIds(context, row_ids);
 		}
@@ -2350,7 +2350,7 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		}
 	}
 
-	if(context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q18 && context.client.q18_orderkey.size() != 0) {
+	if( context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q18 && context.client.q18_orderkey.size() != 0) {
 		if( bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem" ) {
 			if(*cursor == 0) {
 				TPCH_Q18_Lineitem_GetRowIds(context, row_ids);
@@ -2434,7 +2434,7 @@ SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk
 		}
 	}
 
-	if( bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem" && context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q19) {
+	if( context.client.GetCurrentQuery() == (char*)TPCH_QUERIES_q19 && bind_data.get()->Cast<TableScanBindData>().table.name == "lineitem") {
 		if(*cursor == 0) {
 			TPCH_Q19_Lineitem_GetRowIds(context, row_ids);
 		}
