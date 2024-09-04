@@ -2185,7 +2185,8 @@ void PhysicalTableScan::TPCH_Q19_Lineitem_GetRowIds(ExecutionContext &context, v
 
 SourceResultType PhysicalTableScan::GetData(ExecutionContext &context, DataChunk &chunk,
                                             OperatorSourceInput &input) const {
-	// TPCH_Q5(context);
+	// TPCH_Q5(context);	// Uncomment this line if you want to execute the CUBIT-powered Q5.
+							// Similarly, specify TPCH_Q1(context) if you want to run Q1.
 
 	D_ASSERT(!column_ids.empty());
 	auto &gstate = input.global_state.Cast<TableScanGlobalSourceState>();
